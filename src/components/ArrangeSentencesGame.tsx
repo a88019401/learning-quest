@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { Card, SectionTitle } from "./ui";
+import { useState } from "react";import { Card, SectionTitle } from "./ui";
 import { shuffle } from "../lib/questionGen";
 
 

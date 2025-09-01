@@ -1,5 +1,5 @@
 // App.tsx
-import React, { useState } from "react";
+import { useState } from "react";
 import { UNITS } from "./data/units";
 import type { UnitConfig, UnitId } from "./types";
 import { useProgress } from "./state/progress";
@@ -25,13 +25,7 @@ type GrammarView = "explain" | "reorder";
 type TextView = "story" | "arrange";
 type ChallengeMode = "select" | "play";
 
-// 顯示用：全單元概覽（保留）
-function starsFromScore(best: number) {
-  if (best >= 9) return 3;
-  if (best >= 7) return 2;
-  if (best >= 4) return 1;
-  return 0;
-}
+
 
 // 關卡星星規則（可自行調整，現為 9/7/4）
 function computeLevelStars(score: number) {

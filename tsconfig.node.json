@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "composite": true, // ✅ Project references 必須
+
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2023",
     "lib": ["ES2023"],

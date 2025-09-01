@@ -1,5 +1,4 @@
 // src/components/BadgesView.tsx
-import React from "react";
 import type { Progress } from "../state/progress";
 
 const BADGE_META: Record<string, { name: string; desc: string }> = {

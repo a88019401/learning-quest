@@ -1,4 +1,3 @@
-import React from "react";
 import type { Story } from "../types";
 import { Card, SectionTitle } from "./ui";
 

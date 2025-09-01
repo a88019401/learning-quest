@@ -1,6 +1,5 @@
 // components/ChallengeRun.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { UnitConfig } from "../types";
+import { useEffect, useMemo, useRef, useState } from "react";import type { UnitConfig } from "../types";
 import { Card, SectionTitle } from "./ui";
 import { makeChallengeSet } from "../lib/questionGen";
 
