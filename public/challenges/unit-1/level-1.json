@@ -1,0 +1,34 @@
+{
+  "meta": { "time": 45, "title": "Unit 1 • Level 1" },
+  "questions": [
+    {
+      "id": "u1-l1-q1",
+      "prompt": "「你好」的英文是？",
+      "choices": ["Hello", "Bye", "Please", "Thanks"],
+      "correctIndex": 0,
+      "explain": "最常見的問候語：Hello。",
+      "tag": "vocab"
+    },
+    {
+      "id": "u1-l1-q2",
+      "prompt": "I __ a student.",
+      "choices": ["am", "is", "are", "be"],
+      "correctIndex": 0,
+      "explain": "主詞 I 搭配 am。",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q3",
+      "prompt": "故事中第一句是？",
+      "choices": [
+        "Tom is new at school.",
+        "He walks to the library.",
+        "They are friends.",
+        "She is a teacher."
+      ],
+      "correctIndex": 0,
+      "explain": "第一句是開場：Tom is new at school.",
+      "tag": "text"
+    }
+  ]
+}

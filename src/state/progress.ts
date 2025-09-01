@@ -1,13 +1,20 @@
+// state/progress.ts
 import { useCallback, useEffect, useReducer } from "react";
 import type { UnitId } from "../types";
 
 export type UnitProgress = {
-  stars: number; // 0-3
+  stars: number; // 單元整體 0-3（保留舊邏輯）
   xp: number;
   vocab: { studied: number; quizBest: number };
   grammar: { studied: number; reorderBest: number };
   text: { read: number; arrangeBest: number };
-  challenge: { clearedLevels: number; bestTimeSec: number; bestScore: number };
+  challenge: {
+    clearedLevels: number; // 相容舊欄位（最大通關關卡）
+    bestTimeSec: number;   // 全單元的最佳時間（保留）
+    bestScore: number;     // 全單元的最佳分數（保留）
+    // ✅ 新增每關統計
+    levels: Record<number, { bestScore: number; bestTimeSec: number; stars: number }>;
+  };
 };
 
 export type Progress = {
@@ -24,7 +31,12 @@ const defaultUnitProgress = (): UnitProgress => ({
   vocab: { studied: 0, quizBest: 0 },
   grammar: { studied: 0, reorderBest: 0 },
   text: { read: 0, arrangeBest: 0 },
-  challenge: { clearedLevels: 0, bestTimeSec: 0, bestScore: 0 },
+  challenge: {
+    clearedLevels: 0,
+    bestTimeSec: 0,
+    bestScore: 0,
+    levels: {}, // ✅
+  },
 });
 
 const defaultProgress = (): Progress => ({
@@ -49,8 +61,12 @@ const defaultProgress = (): Progress => ({
 });
 
 function computeStars(u: UnitProgress): number {
+  // 單元整體星等（保留舊估算方式）
   const scoreLike =
-    u.vocab.quizBest + u.grammar.reorderBest + u.text.arrangeBest + u.challenge.bestScore / 5;
+    u.vocab.quizBest +
+    u.grammar.reorderBest +
+    u.text.arrangeBest +
+    u.challenge.bestScore / 5;
   return Math.min(3, Math.floor(scoreLike / 5));
 }
 
@@ -94,8 +110,7 @@ function recompute(progress: Progress): Progress {
 
 function restore(): Progress | null {
   try {
-    const raw =
-      typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     return raw ? (JSON.parse(raw) as Progress) : null;
   } catch {
     return null;
@@ -175,7 +190,6 @@ export function useProgress() {
 
   const reset = useCallback(() => {
     dispatch({ type: "RESET" });
-    // 同步清空 localStorage（可選）
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {}

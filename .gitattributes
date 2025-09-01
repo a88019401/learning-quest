@@ -1,0 +1,4 @@
+* text=auto eol=lf
+# 真的需要 CRLF 的檔案再個別指定：
+*.bat eol=crlf
+*.ps1 eol=crlf

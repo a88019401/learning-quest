@@ -35,3 +35,10 @@ words: Word[];
 grammar: GrammarPoint[];
 story: Story;
 };
+
+// types.ts
+export type LevelStat = {
+  bestScore: number;      // 該關最佳分數（0~10）
+  bestTimeSec: number;    // 該關最佳時間（秒）
+  stars: number;          // 該關星數（0~3）
+};
