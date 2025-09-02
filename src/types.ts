@@ -11,11 +11,6 @@ examples: string[];
 };
 
 
-export type Story = {
-title: string;
-paragraphs: string[];
-sentencesForArrange: string[];
-};
 
 
 export type MCQ = {
@@ -36,9 +31,19 @@ grammar: GrammarPoint[];
 story: Story;
 };
 
-// types.ts
 export type LevelStat = {
   bestScore: number;      // 該關最佳分數（0~10）
   bestTimeSec: number;    // 該關最佳時間（秒）
   stars: number;          // 該關星數（0~3）
+};
+
+
+export type StoryParagraph =
+  | string
+  | { en: string; zh?: string }; // ← 新增：支援雙語
+
+export type Story = {
+  title: string;
+  paragraphs: StoryParagraph[];   // ← 使用新型別
+  sentencesForArrange: string[];
 };

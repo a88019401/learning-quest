@@ -1,5 +1,5 @@
-// App.tsx
-import { useState } from "react";
+// App.tsx (整合 SnakeChallenge：第 2 / 3 關改為貪吃蛇)
+import { useState, useMemo } from "react";
 import { UNITS } from "./data/units";
 import type { UnitConfig, UnitId } from "./types";
 import { useProgress } from "./state/progress";
@@ -17,6 +17,7 @@ import { makeVocabMCQ } from "./lib/questionGen";
 
 // ✅ React 版挑戰
 import ChallengeRun from "./components/ChallengeRun";
+import SnakeChallenge from "./components/SnakeChallenge";
 
 type Tab = "learn" | "challenge" | "badges";
 type LearnSubTab = "vocab" | "grammar" | "text";
@@ -24,8 +25,6 @@ type VocabView = "set" | "quiz";
 type GrammarView = "explain" | "reorder";
 type TextView = "story" | "arrange";
 type ChallengeMode = "select" | "play";
-
-
 
 // 關卡星星規則（可自行調整，現為 9/7/4）
 function computeLevelStars(score: number) {
@@ -105,6 +104,9 @@ export default function App() {
   // 挑戰區
   const [mode, setMode] = useState<ChallengeMode>("select");
   const [level, setLevel] = useState(1);
+  // 指定哪些關卡使用貪吃蛇
+  const snakeLevels = useMemo(() => new Set<number>([2, 4, 6]), []);
+  const isSnakeLevel = snakeLevels.has(level);
 
   // 資料與進度
   const unit: UnitConfig = UNITS.find((u) => u.id === unitId)!;
@@ -118,13 +120,75 @@ export default function App() {
   );
   const unlockedCount = calcUnlockedCount(uProg.challenge.levels, 10);
 
+  // —— 把原本 ChallengeRun 的 onFinish 抽成共用函式 ——
+  const handleChallengeFinish = (score: number, timeUsed: number) => {
+    const stars = computeLevelStars(score);
+
+    // 每關紀錄
+    const prevLv = uProg.challenge.levels?.[level];
+    const newLv = {
+      bestScore: Math.max(prevLv?.bestScore ?? 0, score),
+      bestTimeSec: prevLv?.bestTimeSec
+        ? Math.min(prevLv.bestTimeSec, timeUsed)
+        : timeUsed,
+      stars: Math.max(prevLv?.stars ?? 0, stars),
+    };
+
+    // 單元彙總
+    const bestScore = Math.max(uProg.challenge.bestScore, score);
+    const bestTime =
+      uProg.challenge.bestTimeSec === 0
+        ? timeUsed
+        : Math.min(uProg.challenge.bestTimeSec, timeUsed);
+
+    // 產生更新後的 levels，等下拿來算解鎖數
+    const nextLevels = {
+      ...(uProg.challenge.levels || {}),
+      [level]: newLv,
+    } as Record<
+      number,
+      { bestScore: number; bestTimeSec: number; stars: number }
+    >;
+
+    const nextUnlocked = calcUnlockedCount(nextLevels, 10);
+    const nextCleared = Math.max(
+      uProg.challenge.clearedLevels,
+      nextUnlocked - 1
+    );
+
+    // 寫回進度
+    patchUnit(unitId, {
+      challenge: {
+        clearedLevels: nextCleared,
+        bestTimeSec: bestTime,
+        bestScore,
+        levels: nextLevels,
+      },
+    });
+
+    // 徽章 & XP（規則保持一致）
+    if (score === 10) awardBadge("PERFECT_10");
+    if (timeUsed <= 40) awardBadge("SPEEDSTER");
+    addXP(unitId, score * 2);
+
+    alert(
+      `挑戰完成！\nUnit ${unitId} - Level ${level}\n得分：${score}/10（${newLv.stars}★）\n用時：${timeUsed}s`
+    );
+
+    // 回關卡選單並預選下一個可玩的關卡
+    setMode("select");
+    setLevel(nextUnlocked);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-neutral-100 to-neutral-50 text-neutral-900">
       {/* Header */}
       <header className="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between">
         <div>
           <div className="text-2xl font-bold tracking-tight">LearningQuest</div>
-          <div className="text-sm text-neutral-500">可模組化英語學習 · 6 單元 · 遊戲化</div>
+          <div className="text-sm text-neutral-500">
+            可模組化英語學習 · 6 單元 · 遊戲化
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <TabButton active={tab === "learn"} onClick={() => setTab("learn")}>
@@ -160,16 +224,23 @@ export default function App() {
           <Card>
             <div className="text-sm text-neutral-500">本單元 XP</div>
             <div className="text-2xl font-bold">{uProg.xp}</div>
-            <div className="text-sm text-neutral-500">總 XP：{progress.totalXP}</div>
+            <div className="text-sm text-neutral-500">
+              總 XP：{progress.totalXP}
+            </div>
           </Card>
           <Card>
             <div className="text-sm text-neutral-500">快捷</div>
             <div className="flex gap-2 mt-2">
-              <button onClick={reset} className="px-3 py-2 rounded-xl border text-sm">
+              <button
+                onClick={reset}
+                className="px-3 py-2 rounded-xl border text-sm"
+              >
                 重置進度
               </button>
               <button
-                onClick={() => alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")}
+                onClick={() =>
+                  alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")
+                }
                 className="px-3 py-2 rounded-xl border text-sm"
               >
                 如何擴充？
@@ -218,23 +289,38 @@ export default function App() {
             <>
               <Card>
                 <div className="flex items-center gap-2 mb-3">
-                  <TabButton active={sub === "vocab"} onClick={() => setSub("vocab")}>
+                  <TabButton
+                    active={sub === "vocab"}
+                    onClick={() => setSub("vocab")}
+                  >
                     1. 單字
                   </TabButton>
-                  <TabButton active={sub === "grammar"} onClick={() => setSub("grammar")}>
+                  <TabButton
+                    active={sub === "grammar"}
+                    onClick={() => setSub("grammar")}
+                  >
                     2. 文法
                   </TabButton>
-                  <TabButton active={sub === "text"} onClick={() => setSub("text")}>
+                  <TabButton
+                    active={sub === "text"}
+                    onClick={() => setSub("text")}
+                  >
                     3. 課文
                   </TabButton>
                 </div>
 
                 {sub === "vocab" && (
                   <div className="flex items-center gap-2">
-                    <TabButton active={vocabView === "set"} onClick={() => setVocabView("set")}>
+                    <TabButton
+                      active={vocabView === "set"}
+                      onClick={() => setVocabView("set")}
+                    >
                       單字集
                     </TabButton>
-                    <TabButton active={vocabView === "quiz"} onClick={() => setVocabView("quiz")}>
+                    <TabButton
+                      active={vocabView === "quiz"}
+                      onClick={() => setVocabView("quiz")}
+                    >
                       4 選 1 小遊戲
                     </TabButton>
                   </div>
@@ -259,7 +345,10 @@ export default function App() {
 
                 {sub === "text" && (
                   <div className="flex items-center gap-2">
-                    <TabButton active={textView === "story"} onClick={() => setTextView("story")}>
+                    <TabButton
+                      active={textView === "story"}
+                      onClick={() => setTextView("story")}
+                    >
                       課文故事
                     </TabButton>
                     <TabButton
@@ -281,7 +370,10 @@ export default function App() {
                     onStudied={() => {
                       addXP(unitId, 5);
                       patchUnit(unitId, {
-                        vocab: { ...uProg.vocab, studied: uProg.vocab.studied + 1 },
+                        vocab: {
+                          ...uProg.vocab,
+                          studied: uProg.vocab.studied + 1,
+                        },
                       });
                     }}
                   />
@@ -291,7 +383,10 @@ export default function App() {
                     onFinished={(score) => {
                       addXP(unitId, score);
                       patchUnit(unitId, {
-                        vocab: { ...uProg.vocab, quizBest: Math.max(uProg.vocab.quizBest, score) },
+                        vocab: {
+                          ...uProg.vocab,
+                          quizBest: Math.max(uProg.vocab.quizBest, score),
+                        },
                       });
                     }}
                   />
@@ -305,7 +400,10 @@ export default function App() {
                     onStudied={() => {
                       addXP(unitId, 5);
                       patchUnit(unitId, {
-                        grammar: { ...uProg.grammar, studied: uProg.grammar.studied + 1 },
+                        grammar: {
+                          ...uProg.grammar,
+                          studied: uProg.grammar.studied + 1,
+                        },
                       });
                     }}
                   />
@@ -317,7 +415,10 @@ export default function App() {
                       patchUnit(unitId, {
                         grammar: {
                           ...uProg.grammar,
-                          reorderBest: Math.max(uProg.grammar.reorderBest, ok ? 1 : 0),
+                          reorderBest: Math.max(
+                            uProg.grammar.reorderBest,
+                            ok ? 1 : 0
+                          ),
                         },
                       });
                     }}
@@ -331,7 +432,9 @@ export default function App() {
                     story={unit.story}
                     onRead={() => {
                       addXP(unitId, 5);
-                      patchUnit(unitId, { text: { ...uProg.text, read: uProg.text.read + 1 } });
+                      patchUnit(unitId, {
+                        text: { ...uProg.text, read: uProg.text.read + 1 },
+                      });
                     }}
                   />
                 ) : (
@@ -342,7 +445,10 @@ export default function App() {
                       patchUnit(unitId, {
                         text: {
                           ...uProg.text,
-                          arrangeBest: Math.max(uProg.text.arrangeBest, correct),
+                          arrangeBest: Math.max(
+                            uProg.text.arrangeBest,
+                            correct
+                          ),
                         },
                       });
                     }}
@@ -356,70 +462,28 @@ export default function App() {
             (mode === "select" ? (
               <LevelGrid
                 total={10}
-                unlockedCount={unlockedCount}              // ✅ 兩星解鎖
+                unlockedCount={unlockedCount} // ✅ 兩星解鎖
                 starsByLevel={starsByLevel}
                 onPick={(lv) => {
                   setLevel(lv);
                   setMode("play");
                 }}
               />
+            ) : // ✅isSnakeLevel選擇關卡 使用貪吃蛇；其餘關卡維持原本題目挑戰
+            isSnakeLevel ? (
+              <SnakeChallenge
+                key={`snake-${unitId}-${level}`}
+                title={`第 ${level} 關：貪吃蛇`}
+                totalTime={60}
+                targetScore={10}
+                onFinish={handleChallengeFinish}
+              />
             ) : (
               <ChallengeRun
                 key={`${unitId}-${level}`}
                 unit={unit}
                 totalTime={60}
-                onFinish={(score, timeUsed) => {
-                  const stars = computeLevelStars(score);
-
-                  // 每關紀錄
-                  const prevLv = uProg.challenge.levels?.[level];
-                  const newLv = {
-                    bestScore: Math.max(prevLv?.bestScore ?? 0, score),
-                    bestTimeSec: prevLv?.bestTimeSec
-                      ? Math.min(prevLv.bestTimeSec, timeUsed)
-                      : timeUsed,
-                    stars: Math.max(prevLv?.stars ?? 0, stars),
-                  };
-
-                  // 單元彙總
-                  const bestScore = Math.max(uProg.challenge.bestScore, score);
-                  const bestTime =
-                    uProg.challenge.bestTimeSec === 0
-                      ? timeUsed
-                      : Math.min(uProg.challenge.bestTimeSec, timeUsed);
-
-                  // 產生更新後的 levels，等下拿來算解鎖數
-                  const nextLevels = {
-                    ...(uProg.challenge.levels || {}),
-                    [level]: newLv,
-                  };
-
-                  const nextUnlocked = calcUnlockedCount(nextLevels, 10);
-                  const nextCleared = Math.max(uProg.challenge.clearedLevels, nextUnlocked - 1);
-
-                  // 寫回進度
-                  patchUnit(unitId, {
-                    challenge: {
-                      clearedLevels: nextCleared,
-                      bestTimeSec: bestTime,
-                      bestScore,
-                      levels: nextLevels,
-                    },
-                  });
-
-                  // 徽章 & XP
-                  if (score === 10) awardBadge("PERFECT_10");
-                  if (timeUsed <= 40) awardBadge("SPEEDSTER");
-                  addXP(unitId, score * 2);
-
-                  alert(
-                    `挑戰完成！\nUnit ${unitId} - Level ${level}\n得分：${score}/10（${newLv.stars}★）\n用時：${timeUsed}s`
-                  );
-
-                  // 回關卡選單並預選下一個可玩的關卡
-                  setMode("select");
-                  setLevel(nextUnlocked);
-                }}
+                onFinish={handleChallengeFinish}
               />
             ))}
 
