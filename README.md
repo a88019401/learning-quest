@@ -1,217 +1,204 @@
-# LearningQuest
-可模組化的英語學習網站（React + TypeScript + Vite + Tailwind v4）
+# 一頁摘要（Executive Summary）
 
-- 三大區域：**學習區**（單字 / 文法 / 課文）、**挑戰區**（限時 4 選 1 題庫）、**獎章區**
-- 遊戲化：XP、星等、限時挑戰、徽章解鎖
-- 完全**資料驅動**：僅需編輯 `src/data/units.ts` 就能替換 6 個單元的內容
-- 進度**本機儲存**（`localStorage`），可一鍵重置
+LearningQuest 是一個可模組化的英語學習網站原型，採用 React + TypeScript + Vite + Tailwind v4 打造。整體以「資料驅動」為核心：只要編輯 `src/data/units.ts` 的教材結構，即可替換 6 個單元的單字、文法與課文內容；系統會自動生成小測與挑戰題庫，並記錄學習進度、XP、星等與徽章。挑戰區支援標準 4 選 1 題庫與可嵌入的小遊戲（例如貪吃蛇 Snake）。
 
 ---
 
-## 目錄
-- [功能特色](#功能特色)
-- [技術棧](#技術棧)
-- [檔案結構](#檔案結構)
-- [快速開始](#快速開始)
-- [Tailwind v4 設定](#tailwind-v4-設定)
-- [如何客製內容](#如何客製內容)
-- [進度與徽章規則](#進度與徽章規則)
-- [常見問題（Troubleshooting）](#常見問題troubleshooting)
-- [部署](#部署)
+# 專案定位與目標
+
+* **定位**：可快速擴充教材與活動的「英語學習平台原型」。
+* **教學目標**：
+
+  1. 提供單字、文法、課文三類內容的互動練習；
+  2. 加入挑戰與徽章機制，提高動機與持續性；
+  3. 以資料結構統一管理教學資源，降低維護成本。
+* **使用情境**：國中英語課、課後自學、補習班練習網站。
 
 ---
 
-## 功能特色
-### 1) 學習區（6 個單元）
-- **單字**：單字集（點擊翻面）、4 選 1 小測
-- **文法**：重點說明、重組句子小遊戲
-- **課文**：故事閱讀、句型排列遊戲
+# 系統架構（Technical Overview）
 
-### 2) 挑戰區
-- 與單元對應的題庫（10 題）  
-- **60 秒**限時、即時計分、得分加成 XP
+* **核心技術**：Vite（開發/建置）、React + TypeScript、Tailwind CSS v4。
+* **執行流程**：
 
-### 3) 獎章區
-- 依據學習/挑戰紀錄自動解鎖：`FIRST_STEPS`、`VOCAB_NOVICE`、`GRAMMAR_APPRENTICE`、`STORY_EXPLORER`、`SPEEDSTER`、`PERFECT_10`、`UNIT_MASTER`
+  1. `index.html` 掛載根節點 `#root`，載入 `src/main.tsx`；
+  2. `main.tsx` 建立 React root 並渲染 `App`；
+  3. `App.tsx` 載入資料與狀態（`useProgress`），切換分頁（學習/挑戰/獎章），渲染各子元件；
+  4. 進度儲存於 `localStorage`，包含各單元星等、XP、徽章等。
 
----
+## 檔案結構（重點）
 
-## 技術棧
-- **Vite**（開發/建置）
-- **React + TypeScript**
-- **Tailwind CSS v4**
-- 本機儲存：`localStorage`
-
----
-
-## 檔案結構
-learning-quest/
-├─ public/
-├─ src/
-│ ├─ components/
-│ │ ├─ ArrangeSentencesGame.tsx
-│ │ ├─ BadgesView.tsx
-│ │ ├─ ChallengeRun.tsx
-│ │ ├─ GrammarExplain.tsx
-│ │ ├─ ReorderSentenceGame.tsx
-│ │ ├─ StoryViewer.tsx
-│ │ ├─ VocabQuiz.tsx
-│ │ ├─ VocabSet.tsx
-│ │ └─ ui.tsx
-│ ├─ data/
-│ │ └─ units.ts # ✅ 只改這裡就能換教材內容
-│ ├─ lib/
-│ │ └─ questionGen.ts # 題庫生成（單字/文法/課文/挑戰）
-│ ├─ state/
-│ │ └─ progress.ts # 進度與徽章邏輯（useProgress hook）
-│ ├─ types.ts # 型別定義
-│ ├─ App.tsx
-│ ├─ main.tsx
-│ └─ index.css # Tailwind 及自訂樣式（遊戲化 UI）
-├─ index.html
-├─ package.json
-├─ postcss.config.js
-├─ tailwind.config.js
-└─ README.md
-
+```
+src/
+├─ components/
+│  ├─ ArrangeSentencesGame.tsx     # 課文句子排列遊戲
+│  ├─ BadgesView.tsx               # 徽章一覽與解鎖狀態
+│  ├─ ChallengeRun.tsx             # 4 選 1 限時挑戰（每單元 10 題）
+│  ├─ GrammarExplain.tsx           # 文法重點說明
+│  ├─ ReorderSentenceGame.tsx      # 文法「重組句子」
+│  ├─ SnakeChallenge.tsx           # 小遊戲：貪吃蛇（可作為關卡）
+│  ├─ StoryViewer.tsx              # 課文閱讀
+│  ├─ VocabQuiz.tsx                # 單字 4 選 1 小測
+│  ├─ VocabSet.tsx                 # 單字集（翻牌、瀏覽）
+│  └─ ui.tsx                       # 共用 UI（Card、SectionTitle、TabButton）
+│
+├─ data/
+│  └─ units.ts                     # 教材資料（6 單元：單字/文法/課文）
+│
+├─ lib/
+│  └─ questionGen.ts               # 題目自動生成器（單字/文法/課文/挑戰）
+│
+├─ state/
+│  └─ progress.ts                  # 進度與徽章邏輯（useProgress hook）
+│
+├─ types.ts                        # 型別：Unit/Word/Grammar/Story/Progress…
+├─ App.tsx                         # 主應用：分頁/子視圖/關卡解鎖/整合 Snake
+├─ main.tsx                        # 入口檔，渲染 App
+└─ index.css                       # Tailwind v4 與自訂樣式
+```
 
 ---
 
-## 快速開始
-> 需要 **Node.js 20.19+ 或 22.12+**  
-> 建議用 [nvm-windows](https://github.com/coreybutler/nvm-windows/releases) 管理版本
+# 核心功能設計（Features）
+
+## 1) 學習區（6 個單元）
+
+* **單字**：單字集瀏覽（翻面）、4 選 1 小測（由題庫生成器產出）。
+* **文法**：重點說明＋重組句子遊戲；完成加 XP，記錄最佳表現。
+* **課文**：故事閱讀與「句型排列」遊戲；完成加 XP，記錄最高分。
+
+## 2) 挑戰區
+
+* 與單元對應的題庫（每關 10 題）；**60 秒限時**、即時計分；
+* 星等規則（預設：9/7/4 對應 3/2/1 星）；
+* **關卡解鎖**：前一關達 **2 星** 才能解鎖下一關；
+* 可替換某些關卡為 **SnakeChallenge（貪吃蛇）**，與 ChallengeRun 共存。
+
+## 3) 獎章區
+
+* 自動根據進度解鎖徽章（例如：FIRST\_STEPS、SPEEDSTER、PERFECT\_10、UNIT\_MASTER…）；
+* 顯示解鎖狀態、時間戳與說明。
+
+---
+
+# 資料驅動與題庫生成
+
+## 單元資料（units.ts）
+
+* 每個 `UnitConfig` 含 `id`、`title`、`words[]`、`grammar[]`、`story{}`：
+
+  * `words[]`：{ term, def, example? }
+  * `grammar[]`：{ point, desc, examples\[] }
+  * `story`：{ title, paragraphs\[], sentencesForArrange\[] }
+* 只要新增/修改 `UNITS` 陣列，即可更換教材與題庫來源（單字小測、文法題、課文題）。
+
+## 題庫生成（questionGen.ts）
+
+* 輸入 `UnitConfig`，輸出 MCQ（單字/文法/課文），並可被 ChallengeRun 組合成每關 10 題的挑戰題庫；
+* 支援解題回饋（explain）與標記（tag）。
+
+---
+
+# 進度模型與徽章（state/progress.ts）
+
+* **儲存位置**：`localStorage`，含 `totalXP`、各單元的 XP、星等、最佳成績；
+* **Hook**：`useProgress()` 提供 `progress`、`addXP`、`patchUnit`、`awardBadge`、`reset`；
+* **星等**：由最佳表現推算，可在 `computeStars()` 客製；
+* **徽章規則**：集中於 `evaluateBadges()`（如 PERFECT\_10、SPEEDSTER…）。
+
+---
+
+# 主要元件說明（Components）
+
+* **VocabSet**：翻牌瀏覽單字集；可逐字學習，累積「已學」。
+* **VocabQuiz**：單字 4 選 1 測驗；計分與回饋（explain）。
+* **GrammarExplain**：展示文法重點，點擊視為一次「學習」。
+* **ReorderSentenceGame**：將句子打散並重組；完成與否影響 XP 與最佳紀錄。
+* **StoryViewer**：段落式閱讀；完成一次增加閱讀次數與 XP。
+* **ArrangeSentencesGame**：將課文句子排序；使用者得分作為 `arrangeBest`。
+* **ChallengeRun**：標準 4 選 1 限時挑戰（10 題 / 60 秒）；結束回傳 `(score, timeUsed)`；
+
+  * 用於關卡化（每單元 10 關），搭配解鎖條件（2 星解鎖下一關）。
+* **SnakeChallenge**：極簡貪吃蛇（20×20 邏輯格；鍵盤/WASD/行動方向鍵）；
+
+  * Props：`totalTime=60`、`targetScore=10`、`speedMs`、`onFinish(score, time)`；
+  * 可被指定為某些關卡的內容，與 ChallengeRun 混用。
+* **BadgesView**：以格狀卡片顯示已解鎖/未解鎖徽章，若已解鎖顯示時間戳。
+* **ui.tsx**：共用 `Card`、`SectionTitle`、`TabButton` 等樣式組件。
+
+---
+
+# App.tsx：版面與體驗
+
+* 頂端三分頁：**學習區** / **挑戰區** / **獎章區**；
+* HUD：顯示目前單元、該單元 XP、總 XP；提供「重置進度」、「如何擴充？」快捷；
+* 單元選擇（共 6）：切換時保留挑戰區解鎖狀態；
+* 挑戰區：
+
+  * 關卡選單（10 關）；
+  * **2 星解鎖**；
+  * 關卡內容可在 **貪吃蛇** 與 **標準 4 選 1** 之間切換；
+  * 完成關卡會呼叫 `onFinish` 更新 XP / 星等 / 徽章。
+
+---
+
+# 安裝、開發與部署（Ops）
+
+## 環境需求
+
+* Node.js 20.19+ 或 22.12+。
+
+## 開發命令
 
 ```bash
-# 安裝依賴
 npm install
-
-# 開發
-npm run dev
-# 打開瀏覽器：http://localhost:5173/
-
-# 建置
+npm run dev      # http://localhost:5173/
 npm run build
-
-# 本地預覽打包結果
 npm run preview
+```
 
+## 部署建議
 
-Tailwind v4 設定
-
-Tailwind 4 把 PostCSS 外掛移到 @tailwindcss/postcss，本專案已使用 v4 寫法：
-
-postcss.config.js
-
-export default {
-  plugins: {
-    '@tailwindcss/postcss': {},
-  },
-}
-
-tailwind.config.js
-
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap');
-@import "tailwindcss";
-
-/* 遊戲化元件（卡片/按鈕/答案狀態/倒數徽章/動畫） */
-:root{ --brand-1:#8b5cf6; --brand-2:#f472b6; }
-/* ...完整樣式已在專案內 index.css 提供，可直接調色與延伸 */
-
-如何客製內容
-
-教材內容集中在 src/data/units.ts：
-
-import type { UnitConfig, UnitId } from "../types";
-
-const mkUnit = (id: UnitId, title: string): UnitConfig => ({
-  id,
-  title,
-  words: [
-    { term: "hello", def: "你好", example: "Hello, my name is Tom." },
-    // ...
-  ],
-  grammar: [
-    { point: "be 動詞 (am/is/are)", desc: "主詞 + be + 補語。", examples: ["I am a student.", ...] },
-  ],
-  story: {
-    title: `${title} — A New Friend`,
-    paragraphs: ["Tom is new at school...", "..."],
-    sentencesForArrange: ["Tom is new at school.", "..."],
-  },
-});
-
-export const UNITS: UnitConfig[] = [
-  mkUnit(1, "Unit 1: Greetings"),
-  // 2~6 ...
-];
+* **Vercel**：Framework 選 Vite；Build Command `npm run build`；Output `dist`；
+* **Netlify**：Build `npm run build`；Publish `dist`。
 
 ---
 
-單字小測、文法題、課文題會由 lib/questionGen.ts 自動組合
+# 客製與延伸（Customization & Roadmap）
 
-想調整挑戰題題數/限時，改 components/ChallengeRun.tsx
+## 客製內容
 
-進度與徽章規則
+* 在 `src/data/units.ts` 直接換內容：單字、文法點、課文段落與「可排列句子」。
+* 調整挑戰題數、限時、星等門檻：集中於 `ChallengeRun` 與 `App.tsx` 計算函式。
+* 將某些關卡改為小遊戲：以 `SnakeChallenge` 取代個別關卡內容。
 
-儲存在 localStorage（key：learningquest-progress-v1）
+## 延伸方向
 
-Hook：useProgress() 暴露 progress / addXP / patchUnit / awardBadge / reset
+* **更多小遊戲**：接水果、打地鼠、打字挑戰；以共用 `onFinish(score, time)` 介面接入。
+* **進度雲同步**：以後端 API 或 Supabase 取代 `localStorage`。
+* **題庫管理台**：表單化編輯 `units.ts`，自動產出 PR。
+* **學習分析**：紀錄作答時間、錯題類型，生成精準複習清單。
+* **多語支援**：詞彙與說明以 JSON i18n 管理。
 
-星等由最佳表現粗略推算（可在 computeStars() 客製）
+---
 
-徽章在 state/progress.ts 的 evaluateBadges() 控制
+# Demo 指南（口頭報告用）
 
-常見問題（Troubleshooting）
+1. 進入首頁：說明三分頁與 HUD（單元、XP、重置）。
+2. 切換到 **學習區** → 單字翻牌 → 單字小測；
+3. 切到 **文法** → 簡要說明 → 重組句子（示範一次）；
+4. 切到 **課文** → 閱讀 → 句子排列；
+5. 轉到 **挑戰區**：亮出 10 關格子，說明 **2 星解鎖規則**；
+6. 示範第 2 或 3 關改為 **貪吃蛇**，60 秒 / 10 分為過關門檻；
+7. 完成一關，展示 XP 增加、星等、徽章變化；
+8. 收尾：說明如何在 `units.ts` 替換教材與題庫、自動延展到整站。
 
-Vite 要求 Node 版本
+---
 
-錯誤：Vite requires Node.js version 20.19+ or 22.12+
+# 附錄：型別與資料結構（摘要）
 
-解法：升級 Node（建議 nvm install 22.12.0 && nvm use 22.12.0）
+* `UnitConfig`：`{ id, title, words[], grammar[], story{} }`
+* `Progress`：`totalXP` + `byUnit`（含單字/文法/課文/挑戰子結構：最佳分數/次數）+ `badges{}`
+* `SnakeChallengeProps`：`{ title?, totalTime?, targetScore?, speedMs?, onFinish(score, time) }`
 
-Tailwind v4 + PostCSS
-
-錯誤：It looks like you're trying to use tailwindcss directly as a PostCSS plugin
-
-解法：安裝 @tailwindcss/postcss 並使用上面提供的 postcss.config.js
-
-CSS 匯入順序
-
-錯誤：@import must precede all other statements
-
-解法：把 @import 放到 index.css 最上方
-
-找不到工具類
-
-錯誤：unknown utility class 'text-neutral-900'
-
-解法：確認 index.css 有 @import "tailwindcss"，且 tailwind.config.js 的 content 指到 ./src/**/*
-
-Windows 刪除 node_modules
-
-PowerShell 指令：Remove-Item -Recurse -Force node_modules
-
-匯入錯誤
-
-錯誤：does not provide an export named ...
-
-解法：確認檔名/路徑大小寫、匯出名稱（export default vs export const）
-
-部署
-Vercel
-
-新增專案 → 連接 GitHub Repo
-
-Framework 選 Vite
-
-Build Command：npm run build
-
-Output Dir：dist
-
-Netlify
-
-New site from Git → 選 Repo
-
-Build Command：npm run build
-
-Publish directory：dist
+> 本文件可作為說明文件、專案 README 擴充章節，或投影片講稿的基底。
