@@ -162,6 +162,8 @@ export default function VocabSet({ title = "單字集", words, onStudied }: Prop
               console.log("[FX] fireworks -> hide", { idx });
             }, 1100);
           } else {
+            // ⛔️ 這次不正確 -> 一定清成未通過（即使曾通過過）
+            setPassed((p) => ({ ...p, [idx]: false }));
             try { "vibrate" in navigator && navigator.vibrate?.(160); } catch {}
             setShakeIdx(idx); setTimeout(() => setShakeIdx((cur) => (cur === idx ? null : cur)), 360);
             setFails((f) => ({ ...f, [idx]: (f[idx] || 0) + 1 }));
@@ -193,9 +195,23 @@ export default function VocabSet({ title = "單字集", words, onStudied }: Prop
   const startListen = (i: number) => {
     if (!recRef.current) return;
     try { recRef.current.stop(); } catch {}
+    // ⭐️ 重新作答：先把該卡「通過」清掉，回到待評分狀態
+    setPassed((p) => {
+      if (p[i]) console.log("[SR] reattempt -> clear pass", { idx: i });
+      return { ...p, [i]: false };
+    });
+    // 可選：清掉舊提示
+    setLetterHints((h) => { const { [i]: _, ...rest } = h; return rest; });
+
     curIdxRef.current = i; partialRef.current = ""; setListeningIdx(i);
     console.log("[SR] startListen", { idx: i, target: words[i]?.term });
-    setTimeout(() => { try { recRef.current!.start(); } catch (e) { console.warn("[SR] start error:", e); setListeningIdx(null); curIdxRef.current = null; } }, 80);
+    setTimeout(() => {
+      try { recRef.current!.start(); }
+      catch (e) {
+        console.warn("[SR] start error:", e);
+        setListeningIdx(null); curIdxRef.current = null;
+      }
+    }, 80);
   };
 
   const stopListen = () => { console.log("[SR] stopListen"); try { recRef.current?.stop(); } catch (e) { console.warn("[SR] stop error:", e); } };
@@ -264,24 +280,33 @@ export default function VocabSet({ title = "單字集", words, onStudied }: Prop
 
               {/* 操作列：僅在英文面顯示 */}
               {isBack && (
-                <div className="mt-3 flex items-center gap-2">
-                  {ttsSupported && (
-                    <button
-                      onClick={() => speak(w.term)}
-                      className="px-3 py-1.5 rounded-lg text-sm border bg-white border-neutral-300 hover:bg-neutral-100"
-                      aria-label="play audio" title="播放發音"
-                    >🔈 發音</button>
-                  )}
-                  {srSupported && (
-                    <button
-                      onClick={() => (isListening ? stopListen() : startListen(idx))}
-                      className={`px-3 py-1.5 rounded-lg text-sm border ${
-                        isListening ? "bg-red-50 border-red-300" : "bg-white border-neutral-300 hover:bg-neutral-100"
-                      }`}
-                      aria-label="speech recognition" title="讀出英文"
-                    >{isListening ? "🛑 停止" : "🎤 跟讀"}</button>
-                  )}
-                  <div className="text-xs text-neutral-600 truncate max-w-[16rem] md:max-w-[20rem]" title={said || ""} aria-live="polite">
+                <div className="mt-3 space-y-1">
+                  {/* 第一行：固定寬度按鈕，不被拉伸 */}
+                  <div className="flex items-center gap-2">
+                    {ttsSupported && (
+                      <button
+                        onClick={() => speak(w.term)}
+                        className="px-3 py-1.5 rounded-lg text-sm border bg-white border-neutral-300 hover:bg-neutral-100 w-[84px] flex-none"
+                        aria-label="play audio" title="播放發音"
+                      >🔈 發音</button>
+                    )}
+                    {srSupported && (
+                      <button
+                        onClick={() => (isListening ? stopListen() : startListen(idx))}
+                        className={`px-3 py-1.5 rounded-lg text-sm border w-[96px] flex-none ${
+                          isListening ? "bg-red-50 border-red-300" : "bg-white border-neutral-300 hover:bg-neutral-100"
+                        }`}
+                        aria-label="speech recognition" title="讀出英文"
+                      >{isListening ? "🛑 停止" : "🎤 跟讀"}</button>
+                    )}
+                  </div>
+
+                  {/* 第二行：你說（長句自動換行、必要時捲動） */}
+                  <div
+                    className="text-xs text-neutral-700 break-words whitespace-normal max-h-16 overflow-y-auto pr-1"
+                    title={said || ""}
+                    aria-live="polite"
+                  >
                     {said ? `你說：${said}` : "（尚未錄音）"}
                   </div>
                 </div>
