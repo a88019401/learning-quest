@@ -139,7 +139,7 @@ export default function VocabSet({ title = "單字集", words, onStudied }: Prop
           setHeard((h) => { const next = { ...h, [curIdxRef.current as number]: text }; console.log("[SR] setHeard:", next); return next; });
         }
       };
-      r.onerror = (e) => { console.warn("[SR] onerror:", e); curIdxRef.current = null; setListeningIdx(null); };
+      r.onerror = (e: any) => { console.warn("[SR] onerror:", e); curIdxRef.current = null; setListeningIdx(null); };
       r.onend = () => {
         console.log("[SR] onend");
         const idx = curIdxRef.current;
