@@ -1,24 +1,31 @@
-// components/SnakeChallenge.tsx
-import  { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// SnakeChallenge.tsx
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Word } from "../types";
 import { Card, SectionTitle } from "./ui";
 
 /**
- * 極簡可嵌入的貪吃蛇（Snake）小遊戲
- * - 與 ChallengeRun 相容：以 onFinish(score, timeUsed) 回傳結果
- * - 預設限時 60 秒，目標 10 分（吃到 10 顆蘋果）
- * - 可用鍵盤（↑↓←→ / WASD）與行動裝置螢幕上的方向鍵
- * - 解析度自動縮放（邏輯格 20x20）
+ * 第 2 關：貪吃蛇（Vocabulary Multiple-Choice 版）
+ * - 固定 10 題（可調），每題同時出現 3 個選項（紅點），吃到其中一個即作答，立即換下一題
+ * - 題目 UI 美化（進度條、卡片風），單字以「白底圓角標籤」清楚顯示在紅點「上方」
+ * - 預設通關門檻 7/10（與一般選擇題一致，可調整 passScore）
+ * - 研究追蹤：逐題紀錄「作答時間、是否正確、選錯了什麼」，結束時透過 onReport 回傳
+ * - 從外部傳入 words（建議用 unit.words 或 UNITS[0].words）
  */
 
 export type SnakeChallengeProps = {
   title?: string;
-  totalTime?: number; // 限時秒數（預設 60）
-  targetScore?: number; // 預設 10（與既有關卡分數一致）
-  speedMs?: number; // 蛇移動間隔（毫秒）
+  totalTime?: number;        // 總限時（秒），預設 120
+  speedMs?: number;          // 蛇移動間隔（毫秒）
+  words?: Word[];            // 題庫（建議傳 unit.words）
+  totalQuestions?: number;   // 題數（預設 10）
+  passScore?: number;        // 及格分數（預設 7）
+  questionMode?: "defToTerm" | "termToDef"; // 題幹呈現方式（預設 defToTerm：看中吃英）
+  growOnCorrect?: boolean;   // 答對是否加長蛇身（預設 true）
   onFinish: (score: number, timeUsed: number) => void;
+  onReport?: (report: SnakeReport) => void;
 };
 
-const GRID = 20; // 20x20 格
+const GRID = 20;
 const DIRS = {
   UP: { x: 0, y: -1 },
   DOWN: { x: 0, y: 1 },
@@ -27,235 +34,462 @@ const DIRS = {
 };
 
 type Pos = { x: number; y: number };
+type FoodItem = { id: string; pos: Pos; word: Word; correct: boolean };
+
+// ==== 研究紀錄型別 ====
+export type SnakeRoundLog = {
+  round: number;                 // 第幾題（1-based）
+  prompt: string;                // 題幹文字
+  promptMode: "defToTerm" | "termToDef";
+  correctTerm: string;
+  correctDef: string;
+  options: string[];             // 呈現的英文選項（term）
+  selectedTerm: string;          // 玩家實際吃到的 term
+  isCorrect: boolean;
+  responseTimeMs: number;        // 該題出現→作答時間
+};
+
+export type SnakeReport = {
+  title: string;
+  totalQuestions: number;
+  passScore: number;
+  totalTime: number;
+  usedTime: number;
+  correct: number;
+  wrong: number;
+  passed: boolean;
+  logs: SnakeRoundLog[];
+  wrongByTerm: Record<string, number>; // 錯誤選項統計（term -> 次數）
+};
+
+function uid() { return Math.random().toString(36).slice(2, 9); }
+function samePos(a: Pos, b: Pos) { return a.x === b.x && a.y === b.y; }
+function randInt(n: number) { return Math.floor(Math.random() * n); }
 
 function randCell(exclude: Pos[]): Pos {
   while (true) {
-    const p = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) };
-    if (!exclude.some((e) => e.x === p.x && e.y === p.y)) return p;
+    const p = { x: randInt(GRID), y: randInt(GRID) };
+    if (!exclude.some((e) => samePos(e, p))) return p;
   }
 }
+function randCells(n: number, exclude: Pos[]): Pos[] {
+  const taken: Pos[] = [...exclude];
+  const out: Pos[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = randCell(taken);
+    out.push(p);
+    taken.push(p);
+  }
+  return out;
+}
+
+const FALLBACK: Word[] = [
+  { term: "family", def: "家人；家庭" },
+  { term: "husband", def: "丈夫" },
+  { term: "wife", def: "妻子" },
+  { term: "uncle", def: "叔伯；姑姨丈；舅舅" },
+  { term: "aunt", def: "嬸伯母；姑姨媽；舅媽" },
+  { term: "cousin", def: "堂（表）兄弟姐妹" },
+];
 
 export default function SnakeChallenge({
-  title = "第 2–3 關：貪吃蛇",
-  totalTime = 60,
-  targetScore = 10,
-  speedMs = 120,
+  title = "第 2 關：貪吃蛇（單字）",
+  totalTime = 120,
+  speedMs = 110,
+  words = FALLBACK,
+  totalQuestions = 10,
+  passScore = 7,
+  questionMode = "defToTerm",
+  growOnCorrect = true,
   onFinish,
+  onReport,
 }: SnakeChallengeProps) {
-  //——— UI 與時間 ——–
+  // 基本狀態
   const [started, setStarted] = useState(false);
   const [left, setLeft] = useState(totalTime);
-  const timerRef = useRef<number | null>(null);
-  useEffect(() => {
-    setLeft(totalTime);
-  }, [totalTime]);
+  const [gameOver, setGameOver] = useState(false);
 
-  //——— 遊戲狀態 ——–
-  const [dir, setDir] = useState<Pos>(DIRS.RIGHT);
-  const [nextDir, setNextDir] = useState<Pos>(DIRS.RIGHT);
-  const [snake, setSnake] = useState<Pos[]>(() => [
+  const [dir, setDir] = useState(DIRS.RIGHT);
+  const [nextDir, setNextDir] = useState(DIRS.RIGHT);
+  const [snake, setSnake] = useState<Pos[]>([
     { x: 5, y: 10 },
     { x: 4, y: 10 },
     { x: 3, y: 10 },
   ]);
-  const [food, setFood] = useState<Pos>(() => randCell([]));
+
+  const pool = (words && words.length >= 3 ? words : FALLBACK);
+  const [round, setRound] = useState(1);           // 1..totalQuestions
+  const [foods, setFoods] = useState<FoodItem[]>([]);
+  const [prompt, setPrompt] = useState<string>("");
+
   const [score, setScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
+  const [logs, setLogs] = useState<SnakeRoundLog[]>([]);
+  const roundStartRef = useRef<number>(0);
 
-  //——— 畫布大小自適應 ——–
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const size = useMemo(() => 400, []); // 基準尺寸
+  const size = useMemo(() => 480, []);
 
-  //——— 鍵盤與行動裝置控制 ——–
+  // 控制：鍵盤＆D-Pad
   const steer = useCallback((dx: number, dy: number) => {
-    // 禁止 180 度回頭
-    if (dx + dir.x === 0 && dy + dir.y === 0) return;
+    if (dx + dir.x === 0 && dy + dir.y === 0) return; // 禁 180 度回頭
     setNextDir({ x: dx, y: dy });
   }, [dir.x, dir.y]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const k = e.key.toLowerCase();
-      if (["arrowup", "w"].includes(k)) steer(0, -1);
-      else if (["arrowdown", "s"].includes(k)) steer(0, 1);
-      else if (["arrowleft", "a"].includes(k)) steer(-1, 0);
-      else if (["arrowright", "d"].includes(k)) steer(1, 0);
+      if (k === "arrowup" || k === "w") steer(0, -1);
+      if (k === "arrowdown" || k === "s") steer(0, 1);
+      if (k === "arrowleft" || k === "a") steer(-1, 0);
+      if (k === "arrowright" || k === "d") steer(1, 0);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [steer]);
 
-  //——— 倒數計時 ——–
+  // 倒數
   useEffect(() => {
     if (!started || gameOver) return;
-    timerRef.current = window.setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000) as any;
-    return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-    };
+    const t = window.setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => window.clearInterval(t);
   }, [started, gameOver]);
 
   useEffect(() => {
-    if (started && left === 0) {
-      setGameOver(true);
-      onFinish(score, totalTime);
-    }
-  }, [left, started, score, totalTime, onFinish]);
+    if (started && left === 0 && !gameOver) endGame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left, started]);
 
-  //——— 主迴圈（移動） ——–
-  const loopRef = useRef<number | null>(null);
+  // 產生一題（3 選）
+  const makeRound = useCallback((curSnake: Pos[]) => {
+    const idxs = new Set<number>();
+    while (idxs.size < 3) idxs.add(randInt(pool.length));
+    const chosen = [...idxs].map((i) => pool[i]);
+    const correctIndex = randInt(3);
+    const correctWord = chosen[correctIndex];
+
+    const p =
+      questionMode === "termToDef"
+        ? `請吃掉「${correctWord.term}」的正確中文意思`
+        : `請吃掉代表「${correctWord.def}」的英文單字`;
+
+    const ps = randCells(3, curSnake);
+    const fs: FoodItem[] = chosen.map((w, i) => ({
+      id: uid(),
+      word: w,
+      correct: i === correctIndex,
+      pos: ps[i],
+    }));
+
+    setFoods(fs);
+    setPrompt(p);
+    roundStartRef.current = performance.now();
+  }, [pool, questionMode]);
+
+  // 主迴圈
   useEffect(() => {
     if (!started || gameOver) return;
 
     const step = () => {
-      setDir(nextDir); // 每格只採用一次最新方向
+      setDir(nextDir);
       setSnake((prev) => {
         const head = { x: prev[0].x + nextDir.x, y: prev[0].y + nextDir.y };
 
-        // 撞牆 / 撞到自己
+        // 撞牆／撞自己
         if (head.x < 0 || head.y < 0 || head.x >= GRID || head.y >= GRID) {
-          setGameOver(true);
-          onFinish(score, totalTime - left);
+          endGame();
           return prev;
         }
-        if (prev.some((p) => p.x === head.x && p.y === head.y)) {
-          setGameOver(true);
-          onFinish(score, totalTime - left);
+        if (prev.some((p) => samePos(p, head))) {
+          endGame();
           return prev;
         }
 
-        // 吃到食物：加分、變長、重新擺放食物
-        if (head.x === food.x && head.y === food.y) {
-          const next = [head, ...prev];
-          setScore((s) => s + 1);
-          setFood(randCell(next));
-          if (score + 1 >= targetScore) {
-            setGameOver(true);
-            onFinish(score + 1, totalTime - left);
+        // 吃到選項？
+        const hitIdx = foods.findIndex((f) => samePos(f.pos, head));
+        if (hitIdx >= 0) {
+          const hit = foods[hitIdx];
+          const now = performance.now();
+          const responseTimeMs = Math.max(0, Math.round(now - roundStartRef.current));
+
+          const correctWord = foods.find((f) => f.correct)!.word;
+          const options = foods.map((f) => f.word.term);
+          const isCorrect = hit.correct;
+
+          setLogs((old) => [
+            ...old,
+            {
+              round,
+              prompt,
+              promptMode: questionMode,
+              correctTerm: correctWord.term,
+              correctDef: correctWord.def,
+              options,
+              selectedTerm: hit.word.term,
+              isCorrect,
+              responseTimeMs,
+            },
+          ]);
+
+          const newScore = isCorrect ? score + 1 : score;
+          setScore(newScore);
+
+          // 收尾 or 下一題
+          if (round >= totalQuestions) {
+            endGame(newScore);
+            return prev;
+          } else {
+            const nextRound = round + 1;
+            setRound(nextRound);
+            const nextBody = isCorrect && growOnCorrect ? [head, ...prev] : [head, ...prev.slice(0, -1)];
+            makeRound(nextBody);
+            return nextBody;
           }
-          return next; // 不移除尾巴 -> 變長
         }
 
-        // 正常前進：頭 + 身體其餘向前
-        const next = [head, ...prev.slice(0, -1)];
-        return next;
+        // 平移
+        return [head, ...prev.slice(0, -1)];
       });
     };
 
-    const id = window.setInterval(step, speedMs) as unknown as number;
-    loopRef.current = id;
-    return () => window.clearInterval(id);
-  }, [started, gameOver, nextDir, food, score, totalTime, left, speedMs, onFinish]);
+    const loop = window.setInterval(step, speedMs);
+    return () => window.clearInterval(loop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, gameOver, foods, nextDir, speedMs, round, prompt, questionMode, growOnCorrect, score, totalQuestions]);
 
-  //——— 繪圖 ——–
+  // 初始一題（未開始也先顯示）
+  useEffect(() => {
+    makeRound(snake);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 畫面
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv) return;
     const ctx = cv.getContext("2d");
     if (!ctx) return;
 
-    // 背景
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.fillStyle = "#f8fafc"; // slate-50
-    ctx.fillRect(0, 0, cv.width, cv.height);
-
+    const W = cv.width, H = cv.height;
     const cell = Math.floor(cv.width / GRID);
 
-    // 棋盤淡淡格線（可關閉）
-    ctx.strokeStyle = "#e5e7eb"; // neutral-200
+    // 背景
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+
+    // 柔和格線
+    ctx.strokeStyle = "#eef2f7";
     ctx.lineWidth = 1;
-    for (let i = 0; i <= GRID; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * cell + 0.5, 0);
-      ctx.lineTo(i * cell + 0.5, cv.height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * cell + 0.5);
-      ctx.lineTo(cv.width, i * cell + 0.5);
-      ctx.stroke();
+    for (let i = 1; i < GRID; i++) {
+      const d = i * cell;
+      ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, d); ctx.lineTo(W, d); ctx.stroke();
     }
 
-    // 食物
-    ctx.fillStyle = "#ef4444"; // red-500
-    ctx.beginPath();
-    ctx.arc((food.x + 0.5) * cell, (food.y + 0.5) * cell, Math.floor(cell * 0.35), 0, Math.PI * 2);
-    ctx.fill();
+    // 食物：紅點 + 上方白底標籤（清楚可讀）
+    foods.forEach((f) => {
+      const cx = (f.pos.x + 0.5) * cell;
+      const cy = (f.pos.y + 0.5) * cell;
+
+      // 紅點
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.floor(cell * 0.38), 0, Math.PI * 2);
+      ctx.fill();
+
+      // label
+      const label = f.word.term;
+      ctx.font = `${Math.max(16, Math.floor(cell * 0.40))}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+
+      const padX = Math.floor(cell * 0.28);
+      const padY = Math.floor(cell * 0.18);
+      const textW = ctx.measureText(label).width;
+      const boxW = Math.min(textW + padX * 2, W * 0.9);
+      const boxH = Math.floor(cell * 0.9);
+
+      const boxX = Math.min(Math.max(cx - boxW / 2, 4), W - boxW - 4);
+      const desiredY = cy - Math.floor(cell * 0.9) - 6;
+      const boxY = Math.max(4, desiredY);
+
+      roundRect(ctx, boxX, boxY, boxW, boxH, Math.floor(boxH / 2));
+      ctx.fillStyle = "#111827";
+      ctx.fillText(label, boxX + boxW / 2, boxY + boxH / 2);
+    });
 
     // 蛇
-    ctx.fillStyle = "#0ea5e9"; // sky-500
+    ctx.fillStyle = "#0ea5e9";
     snake.forEach((p, i) => {
       const r = Math.floor(cell * (i === 0 ? 0.48 : 0.42));
       ctx.beginPath();
       ctx.arc((p.x + 0.5) * cell, (p.y + 0.5) * cell, r, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [snake, food]);
+  }, [snake, foods]);
 
-  //——— 重新開始 ——–
+  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.15)";
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#e5e7eb";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 結束與回報
+  const endGame = useCallback((finalScore?: number) => {
+    const correct = finalScore ?? score;
+    const usedTime = totalTime - left;
+    setGameOver(true);
+    onFinish(correct, usedTime);
+
+    const wrongByTerm: Record<string, number> = {};
+    logs.forEach((l) => {
+      if (!l.isCorrect) wrongByTerm[l.selectedTerm] = (wrongByTerm[l.selectedTerm] || 0) + 1;
+    });
+
+    onReport?.({
+      title,
+      totalQuestions,
+      passScore,
+      totalTime,
+      usedTime,
+      correct,
+      wrong: totalQuestions - correct,
+      passed: correct >= passScore,
+      logs,
+      wrongByTerm,
+    });
+  }, [left, logs, onFinish, onReport, passScore, score, title, totalQuestions, totalTime]);
+
   const reset = useCallback(() => {
     setStarted(false);
     setLeft(totalTime);
+    setGameOver(false);
     setDir(DIRS.RIGHT);
     setNextDir(DIRS.RIGHT);
-    setSnake([
+    const init = [
       { x: 5, y: 10 },
       { x: 4, y: 10 },
       { x: 3, y: 10 },
-    ]);
-    setFood(randCell([]));
+    ];
+    setSnake(init);
+    setRound(1);
     setScore(0);
-    setGameOver(false);
-  }, [totalTime]);
+    setLogs([]);
+    makeRound(init);
+  }, [makeRound, totalTime]);
 
-  //——— 行動裝置 D-Pad ——–
   const DPad = (
     <div className="grid grid-cols-3 gap-2 w-40 select-none">
       <div />
-      <button aria-label="up" onClick={() => steer(0, -1)} className="px-3 py-2 rounded-xl border">↑</button>
+      <button aria-label="up" onClick={() => steer(0, -1)} className="px-3 py-2 rounded-xl border hover:bg-neutral-50">↑</button>
       <div />
-      <button aria-label="left" onClick={() => steer(-1, 0)} className="px-3 py-2 rounded-xl border">←</button>
+      <button aria-label="left" onClick={() => steer(-1, 0)} className="px-3 py-2 rounded-xl border hover:bg-neutral-50">←</button>
       <div />
-      <button aria-label="right" onClick={() => steer(1, 0)} className="px-3 py-2 rounded-xl border">→</button>
+      <button aria-label="right" onClick={() => steer(1, 0)} className="px-3 py-2 rounded-xl border hover:bg-neutral-50">→</button>
       <div />
-      <button aria-label="down" onClick={() => steer(0, 1)} className="px-3 py-2 rounded-xl border">↓</button>
+      <button aria-label="down" onClick={() => steer(0, 1)} className="px-3 py-2 rounded-xl border hover:bg-neutral-50">↓</button>
       <div />
     </div>
   );
 
-  //——— 外觀 ——–
+  const progressPct = Math.min(100, Math.round(((round - 1) / totalQuestions) * 100));
+  const passingHint = `通關門檻：${passScore}/${totalQuestions}`;
+
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <SectionTitle title={`${title}`} desc={`限時 ${totalTime} 秒 · 目標 ${targetScore} 分`} />
+        <SectionTitle title={title} desc={passingHint} />
         <div className={`px-3 py-1 rounded-xl text-sm font-semibold ${left <= 10 ? "bg-red-100 text-red-700" : "bg-neutral-100 text-neutral-700"}`}>
           ⏱ 剩餘 {left}s
         </div>
       </div>
 
-      {/* 畫布 + 控制區 */}
-      <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
-        <div ref={wrapperRef} className="w-full max-w-[480px] aspect-square">
-          <canvas ref={canvasRef} width={size} height={size} className="w-full h-full rounded-2xl border border-neutral-200 bg-white" />
+      {/* 題目區（美化） */}
+      <div className="mt-3 rounded-2xl border bg-gradient-to-br from-white to-neutral-50 p-4">
+        <div className="flex items-center justify-between">
+          <div className="inline-flex items-center gap-2">
+            <span className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium bg-sky-100 text-sky-700">任務</span>
+            <span className="text-sm text-neutral-700">吃掉正確選項以回答問題</span>
+          </div>
+          <div className="text-sm text-neutral-500">第 <span className="font-semibold text-neutral-800">{round}</span> / {totalQuestions} 題</div>
         </div>
-        <div className="flex flex-col items-center gap-4">
-          <div className="text-xl font-semibold">得分：{score}</div>
-          {!started ? (
-            <button onClick={() => setStarted(true)} className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm">開始</button>
-          ) : (
-            <button onClick={reset} className="px-4 py-2 rounded-xl border text-sm">重新開始</button>
-          )}
-          {DPad}
-          <p className="text-xs text-neutral-500">鍵盤（WASD / 方向鍵）亦可操作</p>
+
+        <div className="mt-2 h-2 w-full rounded-full bg-neutral-100 overflow-hidden">
+          <div className="h-full bg-sky-400" style={{ width: `${progressPct}%` }} />
+        </div>
+
+        <div className="mt-3 p-3 rounded-xl bg-white border">
+          <div className="text-[15px] leading-relaxed text-neutral-900">
+            {prompt || "準備中…"}
+          </div>
+          <div className="mt-1 text-xs text-neutral-500">提示：靠近並吃掉「正確」的紅點上方單字即可作答。</div>
         </div>
       </div>
 
-      {/* 結算蓋板 */}
+      {/* 畫布 + 控制區 */}
+      <div className="mt-5 flex flex-col md:flex-row items-center md:items-start gap-6">
+        <div className="w-full max-w-[560px] aspect-square">
+          <canvas
+            ref={canvasRef}
+            width={size}
+            height={size}
+            className="w-full h-full rounded-2xl border border-neutral-200 bg-white"
+          />
+        </div>
+
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-xl font-semibold">得分（正確題數）：{score}</div>
+          {!started ? (
+            <button onClick={() => { setStarted(true); roundStartRef.current = performance.now(); }} className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90">
+              開始挑戰
+            </button>
+          ) : (
+            <button onClick={reset} className="px-4 py-2 rounded-xl border text-sm hover:bg-neutral-50">重新開始</button>
+          )}
+          {DPad}
+          <p className="text-xs text-neutral-500">也可使用鍵盤（WASD／方向鍵）操控</p>
+        </div>
+      </div>
+
+      {/* 結算 */}
       {gameOver && (
-        <div className="mt-4 p-4 rounded-xl bg-neutral-50 border text-center">
-          <div className="text-lg font-semibold mb-1">挑戰結束</div>
-          <div className="text-sm text-neutral-600 mb-3">得分 {score} / {targetScore} · 用時 {totalTime - left}s</div>
-          <div className="flex justify-center gap-3">
-            <button onClick={reset} className="px-4 py-2 rounded-xl border text-sm">再玩一次</button>
+        <div className="mt-5 p-4 rounded-2xl bg-neutral-50 border">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-lg font-semibold">{score >= passScore ? "✅ 通關成功" : "❌ 未達門檻"}</div>
+              <div className="text-sm text-neutral-600">成績：{score} / {totalQuestions}（用時 {totalTime - left}s）</div>
+            </div>
+            <button onClick={reset} className="px-4 py-2 rounded-xl border text-sm hover:bg-white">再玩一次</button>
+          </div>
+
+          {/* 小獎勵／學習診斷提示 */}
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="p-3 rounded-xl bg-white border">
+              <div className="text-sm font-medium">🎯 準確度</div>
+              <div className="mt-1 text-xl font-semibold">{Math.round((score / totalQuestions) * 100)}%</div>
+            </div>
+            <div className="p-3 rounded-xl bg-white border">
+              <div className="text-sm font-medium">🏅 建議獎勵</div>
+              <div className="mt-1 text-sm text-neutral-700">{score >= passScore ? "解鎖「Vocabulary Novice」徽章" : "差一點點！再挑戰一次～"}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-white border">
+              <div className="text-sm font-medium">🧪 研究重點</div>
+              <div className="mt-1 text-xs text-neutral-600">已記錄你的作答時間與錯誤選項，供教學診斷與題組調整。</div>
+            </div>
           </div>
         </div>
       )}
