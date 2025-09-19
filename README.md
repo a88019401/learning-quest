@@ -1,3 +1,8 @@
+2025/9/19 筆記 
+questionGen.ts的用途是 給 VocabQuiz.tsx和ChallengeRun.tsx製造四選一選擇題用的
+然後 學習區 檔案靠 units.ts 挑戰區 則要靠 public\challenges\unit-1\level-1.json 慢慢建構起來
+
+
 # 一頁摘要（Executive Summary）
 
 LearningQuest 是一個可模組化的英語學習網站原型，採用 React + TypeScript + Vite + Tailwind v4 打造。整體以「資料驅動」為核心：只要編輯 `src/data/units.ts` 的教材結構，即可替換 6 個單元的單字、文法與課文內容；系統會自動生成小測與挑戰題庫，並記錄學習進度、XP、星等與徽章。挑戰區支援標準 4 選 1 題庫與可嵌入的小遊戲（例如貪吃蛇 Snake）。
