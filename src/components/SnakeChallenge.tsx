@@ -7,7 +7,7 @@ import { Card, SectionTitle } from "./ui";
  * 第 2 關：貪吃蛇（Vocabulary Multiple-Choice 版）
  * - 固定 10 題（可調），每題同時出現 3 個選項（紅點），吃到其中一個即作答，立即換下一題
  * - 題目 UI 美化（進度條、卡片風），單字以「白底圓角標籤」清楚顯示在紅點「上方」
- * - 預設通關門檻 7/10（與一般選擇題一致，可調整 passScore）
+ * - ✅ 通關門檻 targetScore：達標立即通關（必填；可用於解鎖下一關）
  * - 研究追蹤：逐題紀錄「作答時間、是否正確、選錯了什麼」，結束時透過 onReport 回傳
  * - 從外部傳入 words（建議用 unit.words 或 UNITS[0].words）
  */
@@ -18,7 +18,10 @@ export type SnakeChallengeProps = {
   speedMs?: number;          // 蛇移動間隔（毫秒）
   words?: Word[];            // 題庫（建議傳 unit.words）
   totalQuestions?: number;   // 題數（預設 10）
-  passScore?: number;        // 及格分數（預設 7）
+  /** ✅ 必達門檻（達標立即通關、用於解鎖下一關） */
+  targetScore: number;
+  /** 顯示/回報用門檻；未提供時等同 targetScore */
+  passScore?: number;
   questionMode?: "defToTerm" | "termToDef"; // 題幹呈現方式（預設 defToTerm：看中吃英）
   growOnCorrect?: boolean;   // 答對是否加長蛇身（預設 true）
   onFinish: (score: number, timeUsed: number) => void;
@@ -98,12 +101,15 @@ export default function SnakeChallenge({
   speedMs = 110,
   words = FALLBACK,
   totalQuestions = 10,
-  passScore = 7,
+  targetScore, // ✅ 必填
+  passScore,   // 若未提供，稍後以 targetScore 代入
   questionMode = "defToTerm",
   growOnCorrect = true,
   onFinish,
   onReport,
 }: SnakeChallengeProps) {
+  const threshold = passScore ?? targetScore; // 顯示/回報一律用 threshold
+
   // 基本狀態
   const [started, setStarted] = useState(false);
   const [left, setLeft] = useState(totalTime);
@@ -129,11 +135,16 @@ export default function SnakeChallenge({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const size = useMemo(() => 480, []);
 
+  // 防重複結束（時間到 / 撞牆 / 撞身 / 達標 同時觸發）
+  const finishedRef = useRef(false);
+  const startTimeRef = useRef<number | null>(null);
+
   // 控制：鍵盤＆D-Pad
   const steer = useCallback((dx: number, dy: number) => {
+    if (gameOver || finishedRef.current) return;
     if (dx + dir.x === 0 && dy + dir.y === 0) return; // 禁 180 度回頭
     setNextDir({ x: dx, y: dy });
-  }, [dir.x, dir.y]);
+  }, [dir.x, dir.y, gameOver]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -150,8 +161,8 @@ export default function SnakeChallenge({
   // 倒數
   useEffect(() => {
     if (!started || gameOver) return;
-    const t = window.setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => window.clearInterval(t);
+    const id = window.setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => window.clearInterval(id);
   }, [started, gameOver]);
 
   useEffect(() => {
@@ -230,18 +241,25 @@ export default function SnakeChallenge({
             },
           ]);
 
-          const newScore = isCorrect ? score + 1 : score;
-          setScore(newScore);
+          const nextScore = isCorrect ? score + 1 : score;
+          // ✅ 達標立即通關
+          if (isCorrect && nextScore >= targetScore) {
+            setScore(nextScore);
+            endGame(nextScore);
+            return prev;
+          }
 
           // 收尾 or 下一題
           if (round >= totalQuestions) {
-            endGame(newScore);
+            setScore(nextScore);
+            endGame(nextScore);
             return prev;
           } else {
             const nextRound = round + 1;
             setRound(nextRound);
             const nextBody = isCorrect && growOnCorrect ? [head, ...prev] : [head, ...prev.slice(0, -1)];
             makeRound(nextBody);
+            setScore(nextScore);
             return nextBody;
           }
         }
@@ -254,7 +272,7 @@ export default function SnakeChallenge({
     const loop = window.setInterval(step, speedMs);
     return () => window.clearInterval(loop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, gameOver, foods, nextDir, speedMs, round, prompt, questionMode, growOnCorrect, score, totalQuestions]);
+  }, [started, gameOver, foods, nextDir, speedMs, round, prompt, questionMode, growOnCorrect, score, totalQuestions, targetScore]);
 
   // 初始一題（未開始也先顯示）
   useEffect(() => {
@@ -304,7 +322,7 @@ export default function SnakeChallenge({
       ctx.textAlign = "center";
 
       const padX = Math.floor(cell * 0.28);
-      const padY = Math.floor(cell * 0.18);
+      // const padY = Math.floor(cell * 0.18); // ❌ 未使用，已移除避免 TS6133
       const textW = ctx.measureText(label).width;
       const boxW = Math.min(textW + padX * 2, W * 0.9);
       const boxH = Math.floor(cell * 0.9);
@@ -348,10 +366,17 @@ export default function SnakeChallenge({
     ctx.restore();
   }
 
-  // 結束與回報
+  // 結束與回報（防重複）
   const endGame = useCallback((finalScore?: number) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+
     const correct = finalScore ?? score;
-    const usedTime = totalTime - left;
+    const usedTime =
+      startTimeRef.current != null
+        ? Math.round((performance.now() - startTimeRef.current) / 1000)
+        : totalTime - left;
+
     setGameOver(true);
     onFinish(correct, usedTime);
 
@@ -363,18 +388,21 @@ export default function SnakeChallenge({
     onReport?.({
       title,
       totalQuestions,
-      passScore,
+      passScore: threshold,
       totalTime,
       usedTime,
       correct,
       wrong: totalQuestions - correct,
-      passed: correct >= passScore,
+      passed: correct >= threshold,
       logs,
       wrongByTerm,
     });
-  }, [left, logs, onFinish, onReport, passScore, score, title, totalQuestions, totalTime]);
+  }, [left, logs, onFinish, onReport, score, threshold, title, totalQuestions, totalTime]);
 
   const reset = useCallback(() => {
+    finishedRef.current = false;
+    startTimeRef.current = null;
+
     setStarted(false);
     setLeft(totalTime);
     setGameOver(false);
@@ -407,7 +435,7 @@ export default function SnakeChallenge({
   );
 
   const progressPct = Math.min(100, Math.round(((round - 1) / totalQuestions) * 100));
-  const passingHint = `通關門檻：${passScore}/${totalQuestions}`;
+  const passingHint = `通關門檻：${threshold}/${totalQuestions}`;
 
   return (
     <Card>
@@ -454,7 +482,10 @@ export default function SnakeChallenge({
         <div className="flex flex-col items-center gap-3">
           <div className="text-xl font-semibold">得分（正確題數）：{score}</div>
           {!started ? (
-            <button onClick={() => { setStarted(true); roundStartRef.current = performance.now(); }} className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90">
+            <button
+              onClick={() => { setStarted(true); startTimeRef.current = performance.now(); roundStartRef.current = performance.now(); }}
+              className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90"
+            >
               開始挑戰
             </button>
           ) : (
@@ -470,7 +501,7 @@ export default function SnakeChallenge({
         <div className="mt-5 p-4 rounded-2xl bg-neutral-50 border">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-lg font-semibold">{score >= passScore ? "✅ 通關成功" : "❌ 未達門檻"}</div>
+              <div className="text-lg font-semibold">{score >= threshold ? "✅ 通關成功" : "❌ 未達門檻"}</div>
               <div className="text-sm text-neutral-600">成績：{score} / {totalQuestions}（用時 {totalTime - left}s）</div>
             </div>
             <button onClick={reset} className="px-4 py-2 rounded-xl border text-sm hover:bg-white">再玩一次</button>
@@ -484,7 +515,7 @@ export default function SnakeChallenge({
             </div>
             <div className="p-3 rounded-xl bg-white border">
               <div className="text-sm font-medium">🏅 建議獎勵</div>
-              <div className="mt-1 text-sm text-neutral-700">{score >= passScore ? "解鎖「Vocabulary Novice」徽章" : "差一點點！再挑戰一次～"}</div>
+              <div className="mt-1 text-sm text-neutral-700">{score >= threshold ? "解鎖「Vocabulary Novice」徽章" : "差一點點！再挑戰一次～"}</div>
             </div>
             <div className="p-3 rounded-xl bg-white border">
               <div className="text-sm font-medium">🧪 研究重點</div>

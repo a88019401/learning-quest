@@ -33,20 +33,25 @@ function computeLevelStars(score: number) {
   if (score >= 4) return 1;
   return 0;
 }
-
-// 依「前一關 >=2★」規則計算可解鎖到第幾關
+// 依「通過（preferred）→ 或 2★（fallback）」規則計算可解鎖到第幾關
 function calcUnlockedCount(
-  levels: Record<number, { stars: number }> | undefined,
+  levels: Record<number, { stars: number; passed?: boolean }> | undefined,
   totalLevels: number
 ) {
   let unlocked = 1;
   for (let lv = 1; lv <= totalLevels; lv++) {
-    const stars = levels?.[lv]?.stars ?? 0;
-    if (stars >= 2) unlocked = Math.min(totalLevels, lv + 1);
-    else break;
+    const info = levels?.[lv];
+    const passed = info?.passed === true;      // 新：以通過為主
+    const enoughStars = (info?.stars ?? 0) >= 2; // 舊資料回退規則
+    if (passed || enoughStars) {
+      unlocked = Math.min(totalLevels, lv + 1);
+    } else {
+      break;
+    }
   }
   return unlocked;
 }
+
 
 // ---------- React 版關卡選單 ----------
 function LevelGrid({
@@ -120,65 +125,69 @@ export default function App() {
   );
   const unlockedCount = calcUnlockedCount(uProg.challenge.levels, 10);
 
-  // —— 把原本 ChallengeRun 的 onFinish 抽成共用函式 ——
-  const handleChallengeFinish = (score: number, timeUsed: number) => {
-    const stars = computeLevelStars(score);
+// —— 把原本 ChallengeRun 的 onFinish 抽成共用函式 ——
+// 這裡我們定義：貪吃蛇關卡以 targetScore（這裡我們設 10）為「通過」；非貪吃蛇關卡沿用 2★（7/10）為通過
+const handleChallengeFinish = (score: number, timeUsed: number) => {
+  const stars = computeLevelStars(score);
 
-    // 每關紀錄
-    const prevLv = uProg.challenge.levels?.[level];
-    const newLv = {
-      bestScore: Math.max(prevLv?.bestScore ?? 0, score),
-      bestTimeSec: prevLv?.bestTimeSec
-        ? Math.min(prevLv.bestTimeSec, timeUsed)
-        : timeUsed,
-      stars: Math.max(prevLv?.stars ?? 0, stars),
-    };
+  // 貪吃蛇關卡：必須達到 targetScore（此檔中下方 <SnakeChallenge targetScore={10} />）
+  const snakePassed = score >= 10;
+  // 非貪吃蛇關卡：維持原本 2★（>=7/10）視為通過（避免打壞既有流程）
+  const nonSnakePassed = stars >= 2;
+  const passed = isSnakeLevel ? snakePassed : nonSnakePassed;
 
-    // 單元彙總
-    const bestScore = Math.max(uProg.challenge.bestScore, score);
-    const bestTime =
-      uProg.challenge.bestTimeSec === 0
-        ? timeUsed
-        : Math.min(uProg.challenge.bestTimeSec, timeUsed);
+  // 每關紀錄（加入 passed；通過一次後永久保留）
+  const prevLv = uProg.challenge.levels?.[level] as
+    | { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }
+    | undefined;
 
-    // 產生更新後的 levels，等下拿來算解鎖數
-    const nextLevels = {
-      ...(uProg.challenge.levels || {}),
-      [level]: newLv,
-    } as Record<
-      number,
-      { bestScore: number; bestTimeSec: number; stars: number }
-    >;
-
-    const nextUnlocked = calcUnlockedCount(nextLevels, 10);
-    const nextCleared = Math.max(
-      uProg.challenge.clearedLevels,
-      nextUnlocked - 1
-    );
-
-    // 寫回進度
-    patchUnit(unitId, {
-      challenge: {
-        clearedLevels: nextCleared,
-        bestTimeSec: bestTime,
-        bestScore,
-        levels: nextLevels,
-      },
-    });
-
-    // 徽章 & XP（規則保持一致）
-    if (score === 10) awardBadge("PERFECT_10");
-    if (timeUsed <= 40) awardBadge("SPEEDSTER");
-    addXP(unitId, score * 2);
-
-    alert(
-      `挑戰完成！\nUnit ${unitId} - Level ${level}\n得分：${score}/10（${newLv.stars}★）\n用時：${timeUsed}s`
-    );
-
-    // 回關卡選單並預選下一個可玩的關卡
-    setMode("select");
-    setLevel(nextUnlocked);
+  const newLv: { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean } = {
+    bestScore: Math.max(prevLv?.bestScore ?? 0, score),
+    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, timeUsed) : timeUsed,
+    stars: Math.max(prevLv?.stars ?? 0, stars),
+    passed: prevLv?.passed === true ? true : passed, // 一旦通過就維持 true
   };
+
+  // 單元彙總
+  const bestScore = Math.max(uProg.challenge.bestScore, score);
+  const bestTime =
+    uProg.challenge.bestTimeSec === 0
+      ? timeUsed
+      : Math.min(uProg.challenge.bestTimeSec, timeUsed);
+
+  // 產生更新後的 levels（含 passed）
+  const nextLevels = {
+    ...(uProg.challenge.levels || {}),
+    [level]: newLv,
+  } as Record<number, { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }>;
+
+  const nextUnlocked = calcUnlockedCount(nextLevels, 10);
+  const nextCleared = Math.max(uProg.challenge.clearedLevels, nextUnlocked - 1);
+
+  // 寫回進度
+  patchUnit(unitId, {
+    challenge: {
+      clearedLevels: nextCleared,
+      bestTimeSec: bestTime,
+      bestScore,
+      levels: nextLevels,
+    },
+  });
+
+  // 徽章 & XP（規則保持一致）
+  if (score === 10) awardBadge("PERFECT_10");
+  if (timeUsed <= 40) awardBadge("SPEEDSTER");
+  addXP(unitId, score * 2);
+
+  alert(
+    `挑戰完成！\nUnit ${unitId} - Level ${level}\n得分：${score}/10（${newLv.stars}★）\n通過：${passed ? "是" : "否"}\n用時：${timeUsed}s`
+  );
+
+  // 回關卡選單並預選「下一個可玩的關卡」
+  setMode("select");
+  setLevel(nextUnlocked);
+};
+
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-neutral-100 to-neutral-50 text-neutral-900">
@@ -472,12 +481,14 @@ export default function App() {
             ) : // ✅isSnakeLevel選擇關卡 使用貪吃蛇；其餘關卡維持原本題目挑戰
             isSnakeLevel ? (
               <SnakeChallenge
-                key={`snake-${unitId}-${level}`}
-                title={`第 ${level} 關：貪吃蛇`}
-                totalTime={60}
-                targetScore={10}
-                onFinish={handleChallengeFinish}
-              />
+  key={`snake-${unitId}-${level}`}
+  title={`第 ${level} 關：貪吃蛇`}
+  totalTime={60}
+  words={unit.words}     // ← 使用當前單元的單字庫
+  targetScore={10}       // ← 必達門檻（達標立即通關、用來解鎖）
+  onFinish={handleChallengeFinish}
+/>
+
             ) : (
               <ChallengeRun
                 key={`${unitId}-${level}`}
