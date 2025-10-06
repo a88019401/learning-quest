@@ -13,7 +13,7 @@ import {
   SortableContext,
   verticalListSortingStrategy,
   useSortable,
-  arrayMove,              // ← 用插入排序的關鍵！
+  arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -50,7 +50,7 @@ function SortableRow({
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    touchAction: "none",           // 桌機觸控板／手機手勢都能拖
+    touchAction: "none",
   };
 
   const colorBox = correct
@@ -62,7 +62,7 @@ function SortableRow({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}               // 整列可拖
+      {...listeners}
       className={`flex items-center gap-2 cursor-grab select-none ${
         isDragging ? "opacity-70" : ""
       }`}
@@ -89,12 +89,18 @@ function SortableRow({
 }
 
 export default function ArrangeSentencesGame({ sentences, onFinished }: Props) {
-  const target = useMemo(() => sentences, [sentences]);
+  // 10 題制：若故事超過 10 句，僅取前 10 句計分
+  const total = useMemo(() => Math.min(10, sentences.length), [sentences.length]);
+  const target = useMemo(() => sentences.slice(0, total), [sentences, total]);
   const targetRows = useMemo<Row[]>(
     () => target.map((text, idx) => ({ id: `s-${idx}`, text })),
     [target]
   );
+
   const [list, setList] = useState<Row[]>(() => fisherYates(targetRows));
+  const [done, setDone] = useState(false);
+  const [score, setScore] = useState(0);
+  const [reveal, setReveal] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -103,11 +109,9 @@ export default function ArrangeSentencesGame({ sentences, onFinished }: Props) {
 
   const isCorrectAt = (idx: number) => list[idx]?.text === target[idx];
 
-  // ✅ 插入式排序：拖到哪就放在哪，其他行跟著讓位
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-
     setList((prev) => {
       const oldIndex = prev.findIndex((x) => x.id === String(active.id));
       const newIndex = prev.findIndex((x) => x.id === String(over.id));
@@ -118,25 +122,71 @@ export default function ArrangeSentencesGame({ sentences, onFinished }: Props) {
 
   const finish = () => {
     const correct = list.filter((r, i) => r.text === target[i]).length;
-    onFinished(correct);
+    setScore(correct);
+    setDone(true);
+    onFinished(correct); // 回傳 0~10
   };
 
+  const reset = () => {
+    setList(fisherYates(targetRows));
+    setDone(false);
+    setScore(0);
+    setReveal(false);
+  };
+
+  const showAnswer = () => {
+    setList(targetRows); // 直接還原成答案順序
+    setReveal(true);
+  };
+
+  const passed = score >= Math.ceil(total * 0.7); // 7/10 過關
+
+  // —— 結果畫面 —— //
+  if (done) {
+    return (
+      <Card>
+        <div className={`flex items-center gap-3 mb-3 ${passed ? "text-green-700" : "text-amber-700"}`}>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl ${passed ? "bg-green-100" : "bg-amber-100"}`}>
+            {passed ? "✓" : "!"}
+          </div>
+          <SectionTitle title={passed ? "恭喜通關！" : "再接再厲！"} desc={`得分：${score} / ${total}`} />
+        </div>
+
+        <div className="p-4 rounded-xl border bg-white">
+          <div className="text-sm text-neutral-600">
+            {passed ? "句型掌握不錯！想挑戰更高分嗎？" : "差一點點就過關了，調整幾句就好！"}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={reset} className="px-4 py-2 rounded-xl border bg-neutral-900 text-white hover:opacity-90">
+              再來一次
+            </button>
+            {!reveal && (
+              <button onClick={showAnswer} className="px-4 py-2 rounded-xl border">
+                顯示答案
+              </button>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  // —— 排序畫面 —— //
   return (
     <Card>
-      <SectionTitle
-        title="句型排列小遊戲（拖曳排序｜手機/電腦支援）"
-        desc="拖到目標位置放開：正確亮綠、錯誤亮紅；完全正確可拿滿分"
-      />
+      <div className="flex items-center justify-between mb-2">
+        <SectionTitle
+          title="句型排列小遊戲（拖曳排序｜手機/電腦支援）"
+          desc={`將句子排成正確順序：正確亮綠、錯誤亮紅（可得分：0~${total}）`}
+        />
+        <div className="text-sm text-neutral-500">
+          目標：至少 {Math.ceil(total * 0.7)} 句正確 ✓
+        </div>
+      </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={list.map((x) => x.id)}
-          strategy={verticalListSortingStrategy}
-        >
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={list.map((x) => x.id)} strategy={verticalListSortingStrategy}>
           <ul className="space-y-2">
             {list.map((row, i) => (
               <SortableRow key={row.id} item={row} index={i} correct={isCorrectAt(i)} />
@@ -145,12 +195,21 @@ export default function ArrangeSentencesGame({ sentences, onFinished }: Props) {
         </SortableContext>
       </DndContext>
 
-      <button
-        onClick={finish}
-        className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm mt-3"
-      >
-        完成並計分
-      </button>
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={finish}
+          className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm"
+        >
+          完成並計分
+        </button>
+        <button
+          onClick={() => setList(fisherYates(list))}
+          className="px-4 py-2 rounded-xl border text-sm"
+          title="隨機重排目前列表（不重置）"
+        >
+          打亂一下
+        </button>
+      </div>
     </Card>
   );
 }

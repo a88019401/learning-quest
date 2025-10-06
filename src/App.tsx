@@ -1,7 +1,7 @@
-// App.tsx (整合 SnakeChallenge：第 2 / 3 關改為貪吃蛇)
-import { useState, useMemo } from "react";
+// src/App.tsx
+import { useMemo, useState } from "react";
 import { UNITS } from "./data/units";
-import type { UnitConfig, UnitId } from "./types";
+import type { UnitConfig, UnitId, MCQ } from "./types";
 import { useProgress } from "./state/progress";
 
 import { TabButton, Card, SectionTitle } from "./components/ui";
@@ -13,12 +13,18 @@ import StoryViewer from "./components/StoryViewer";
 import ArrangeSentencesGame from "./components/ArrangeSentencesGame";
 import BadgesView from "./components/BadgesView";
 
-import { makeVocabMCQ } from "./lib/questionGen";
-
-// ✅ React 版挑戰
+// 挑戰
 import ChallengeRun from "./components/ChallengeRun";
 import SnakeChallenge from "./components/SnakeChallenge";
 
+// 固定 JSON 題庫（Unit 1 · Level 1）
+// 若 tsconfig 已開 resolveJsonModule，下面可直接 import；否則加 // @ts-ignore
+// @ts-ignore
+import level1 from "./data/challenges/unit-1/level-1.json";
+
+/* -----------------------------
+   類型（僅供本檔使用）
+------------------------------ */
 type Tab = "learn" | "challenge" | "badges";
 type LearnSubTab = "vocab" | "grammar" | "text";
 type VocabView = "set" | "quiz";
@@ -26,14 +32,38 @@ type GrammarView = "explain" | "reorder";
 type TextView = "story" | "arrange";
 type ChallengeMode = "select" | "play";
 
-// 關卡星星規則（可自行調整，現為 9/7/4）
+type ChallengeItemResult = {
+  id?: string;
+  prompt: string;
+  choices: string[];
+  correctIndex: number;
+  pickedIndex: number | null;
+  correct: boolean;
+  explain?: string;
+  tag?: string;
+};
+
+type ChallengeReport = {
+  unitId: UnitId;
+  level: number;
+  total: number;
+  score: number;
+  timeUsed: number;
+  items: ChallengeItemResult[];
+};
+
+const fixedU1L1: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level1;
+
+/* -----------------------------
+   星等 / 解鎖規則
+------------------------------ */
 function computeLevelStars(score: number) {
-  if (score >= 9) return 3;
+  // 10/7/4 → 3★/2★/1★
+  if (score >= 10) return 3;
   if (score >= 7) return 2;
   if (score >= 4) return 1;
   return 0;
 }
-// 依「通過（preferred）→ 或 2★（fallback）」規則計算可解鎖到第幾關
 function calcUnlockedCount(
   levels: Record<number, { stars: number; passed?: boolean }> | undefined,
   totalLevels: number
@@ -41,8 +71,8 @@ function calcUnlockedCount(
   let unlocked = 1;
   for (let lv = 1; lv <= totalLevels; lv++) {
     const info = levels?.[lv];
-    const passed = info?.passed === true;      // 新：以通過為主
-    const enoughStars = (info?.stars ?? 0) >= 2; // 舊資料回退規則
+    const passed = info?.passed === true;
+    const enoughStars = (info?.stars ?? 0) >= 2;
     if (passed || enoughStars) {
       unlocked = Math.min(totalLevels, lv + 1);
     } else {
@@ -52,8 +82,9 @@ function calcUnlockedCount(
   return unlocked;
 }
 
-
-// ---------- React 版關卡選單 ----------
+/* -----------------------------
+   關卡選單
+------------------------------ */
 function LevelGrid({
   total = 10,
   unlockedCount,
@@ -97,6 +128,126 @@ function LevelGrid({
   );
 }
 
+/* -----------------------------
+   小工具
+------------------------------ */
+const letter = (i: number) => String.fromCharCode(65 + i);
+
+/* -----------------------------
+   結算 Modal（無「摘要」區塊）
+------------------------------ */
+function ResultModal({
+  open,
+  onClose,
+  title,
+  score,
+  total,
+  stars,
+  timeUsed,
+  passed,
+  items,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  score: number;
+  total: number;
+  stars: number;
+  timeUsed: number;
+  passed: boolean;
+  items: ChallengeItemResult[];
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-[61] w-[min(92vw,800px)] max-h-[85vh] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+        <div className="px-5 py-4 border-b flex items-start justify-between">
+          <div>
+            <div className="text-xs text-neutral-500">挑戰完成</div>
+            <div className="text-lg font-semibold">{title}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1 rounded-lg text-sm bg-neutral-100 hover:bg-neutral-200"
+          >
+            關閉
+          </button>
+        </div>
+
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="col-span-1 md:col-span-2 rounded-xl border p-4">
+            <div className="text-sm text-neutral-500 mb-1">本輪星等</div>
+            <div className="text-2xl">
+              {"⭐".repeat(stars)}
+              {"☆".repeat(3 - stars)}
+            </div>
+            <div className="mt-2 text-sm">
+              分數：<span className="font-semibold">{score}</span> / {total}
+            </div>
+            <div className="text-sm">
+              時間：<span className="font-semibold">{timeUsed}s</span>
+            </div>
+            <div className="mt-1 text-sm">
+              通過：{passed ? "✅ 是" : "❌ 否"}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5">
+          <div className="text-sm text-neutral-500 mb-2">每題詳解</div>
+          <div className="overflow-y-auto max-h-[48vh] pr-1">
+            <div className="space-y-3">
+              {items.length === 0 ? (
+                <div className="text-sm text-neutral-600 p-4 rounded-xl border bg-neutral-50">
+                  本關為非選擇題或未提供詳解。
+                </div>
+              ) : (
+                items.map((it, i) => {
+                  const picked =
+                    it.pickedIndex === null
+                      ? "（未作答）"
+                      : `${letter(it.pickedIndex)}. ${it.choices[it.pickedIndex]}`;
+                  const correct = `${letter(it.correctIndex)}. ${it.choices[it.correctIndex]}`;
+                  return (
+                    <div key={it.id ?? `i-${i}`} className="rounded-xl border p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-sm font-medium">
+                          {i + 1}. {it.prompt}
+                        </div>
+                        <div className={`text-sm ${it.correct ? "text-green-600" : "text-red-600"}`}>
+                          {it.correct ? "✔️ 正確" : "❌ 錯誤"}
+                        </div>
+                      </div>
+                      <div className="mt-1 text-sm">
+                        你的作答：<span className="font-medium">{picked}</span>
+                      </div>
+                      <div className="text-sm">
+                        參考答案：<span className="font-medium">{correct}</span>
+                      </div>
+                      {it.explain && (
+                        <div className="mt-1 text-sm text-neutral-700">
+                          詳解：{it.explain}
+                        </div>
+                      )}
+                      {it.tag && (
+                        <div className="mt-1 text-xs text-neutral-500">分類：{it.tag}</div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------
+   App
+------------------------------ */
 export default function App() {
   // 頁籤 / 視圖狀態
   const [tab, setTab] = useState<Tab>("learn");
@@ -118,44 +269,79 @@ export default function App() {
   const { progress, addXP, patchUnit, awardBadge, reset } = useProgress();
   const uProg = progress.byUnit[unitId];
 
-  // 10 關的星數
+  // 關卡星數（顯示在選單上）
   const starsByLevel = Array.from(
     { length: 10 },
     (_, i) => uProg.challenge.levels?.[i + 1]?.stars ?? 0
   );
   const unlockedCount = calcUnlockedCount(uProg.challenge.levels, 10);
 
-// —— 把原本 ChallengeRun 的 onFinish 抽成共用函式 ——
-// 這裡我們定義：貪吃蛇關卡以 targetScore（這裡我們設 10）為「通過」；非貪吃蛇關卡沿用 2★（7/10）為通過
-const handleChallengeFinish = (score: number, timeUsed: number) => {
-  const stars = computeLevelStars(score);
+  // 結算 modal 狀態（使用「本輪星等」）
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalData, setModalData] = useState<{
+    title: string;
+    score: number;
+    total: number;
+    stars: number;
+    timeUsed: number;
+    passed: boolean;
+    items: ChallengeItemResult[];
+  } | null>(null);
+  const [pendingNextLevel, setPendingNextLevel] = useState<number | null>(null);
 
-  // 貪吃蛇關卡：必須達到 targetScore（此檔中下方 <SnakeChallenge targetScore={10} />）
-  const snakePassed = score >= 10;
-  // 非貪吃蛇關卡：維持原本 2★（>=7/10）視為通過（避免打壞既有流程）
-  const nonSnakePassed = stars >= 2;
+  // —— 結算與進度寫回 —— //
+function handleChallengeFinish(
+  arg1: any,
+  arg2?: number,
+  arg3?: { items?: ChallengeItemResult[] } // ★ 新增：ChallengeRun 回傳的詳解
+) {
+  // 允許兩種來源：
+  // 1) ChallengeRun（分數/時間/詳解在第1,2,3參數）
+  // 2) SnakeChallenge（只給 score, timeUsed）
+  let report: ChallengeReport;
+
+  if (typeof arg1 === "object" && arg1 && "score" in arg1 && "items" in arg1) {
+    // 保留相容：若未來有元件直接給完整 report 物件
+    report = arg1 as ChallengeReport;
+  } else {
+    const score = (arg1 as number) ?? 0;
+    const timeUsed = arg2 ?? 0;
+    const items = Array.isArray(arg3?.items) ? (arg3!.items as ChallengeItemResult[]) : [];
+    report = {
+      unitId,
+      level,
+      total: 10,
+      score,
+      timeUsed,
+      items, // ★ 接住每題詳解
+    };
+  }
+
+  // 本輪星等（顯示在 modal）
+  const starsThisRun = computeLevelStars(report.score);
+  // 通過條件（蛇關卡需滿分10；非蛇關卡≥2★）
+  const snakePassed = isSnakeLevel ? report.score >= 10 : false;
+  const nonSnakePassed = starsThisRun >= 2;
   const passed = isSnakeLevel ? snakePassed : nonSnakePassed;
 
-  // 每關紀錄（加入 passed；通過一次後永久保留）
+  // 進度（歷史最佳）
   const prevLv = uProg.challenge.levels?.[level] as
     | { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }
     | undefined;
 
-  const newLv: { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean } = {
-    bestScore: Math.max(prevLv?.bestScore ?? 0, score),
-    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, timeUsed) : timeUsed,
-    stars: Math.max(prevLv?.stars ?? 0, stars),
-    passed: prevLv?.passed === true ? true : passed, // 一旦通過就維持 true
+  const newLv = {
+    bestScore: Math.max(prevLv?.bestScore ?? 0, report.score),
+    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, report.timeUsed) : report.timeUsed,
+    stars: Math.max(prevLv?.stars ?? 0, starsThisRun), // ★ 寫入歷史最佳星等
+    passed: prevLv?.passed === true ? true : passed,
   };
 
   // 單元彙總
-  const bestScore = Math.max(uProg.challenge.bestScore, score);
+  const bestScore = Math.max(uProg.challenge.bestScore, report.score);
   const bestTime =
-    uProg.challenge.bestTimeSec === 0
-      ? timeUsed
-      : Math.min(uProg.challenge.bestTimeSec, timeUsed);
+    uProg.challenge.bestTimeSec === 0 ? report.timeUsed : Math.min(uProg.challenge.bestTimeSec, report.timeUsed);
 
-  // 產生更新後的 levels（含 passed）
+  // 寫回
   const nextLevels = {
     ...(uProg.challenge.levels || {}),
     [level]: newLv,
@@ -164,7 +350,6 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
   const nextUnlocked = calcUnlockedCount(nextLevels, 10);
   const nextCleared = Math.max(uProg.challenge.clearedLevels, nextUnlocked - 1);
 
-  // 寫回進度
   patchUnit(unitId, {
     challenge: {
       clearedLevels: nextCleared,
@@ -174,20 +359,38 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
     },
   });
 
-  // 徽章 & XP（規則保持一致）
-  if (score === 10) awardBadge("PERFECT_10");
-  if (timeUsed <= 40) awardBadge("SPEEDSTER");
-  addXP(unitId, score * 2);
+  // 徽章 & XP
+  if (report.score === 10) awardBadge("PERFECT_10");
+  if (report.timeUsed <= 40) awardBadge("SPEEDSTER");
+  addXP(unitId, report.score * 2);
 
-  alert(
-    `挑戰完成！\nUnit ${unitId} - Level ${level}\n得分：${score}/10（${newLv.stars}★）\n通過：${passed ? "是" : "否"}\n用時：${timeUsed}s`
-  );
+// ★ 開啟結算 modal（本輪星等＋每題詳解）
+setModalData({
+  title: `Unit ${unitId} · Level ${level}`,
+  score: report.score,
+  total: report.total,
+  stars: starsThisRun,
+  timeUsed: report.timeUsed,
+  passed,
+  // ★ 正規化：把 isCorrect 轉成 correct，讓 ResultModal 可直接使用
+  items: (report.items || []).map((it: any) => ({
+    ...it,
+    correct: typeof it.correct === "boolean" ? it.correct : !!it.isCorrect,
+  })),
+});
 
-  // 回關卡選單並預選「下一個可玩的關卡」
-  setMode("select");
-  setLevel(nextUnlocked);
-};
+  setPendingNextLevel(nextUnlocked);
+  setModalOpen(true);
+}
 
+
+  function closeResultModal() {
+    setModalOpen(false);
+    // 回關卡選單並預選「下一個可玩的關卡」
+    setMode("select");
+    if (pendingNextLevel) setLevel(pendingNextLevel);
+    setPendingNextLevel(null);
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-neutral-100 to-neutral-50 text-neutral-900">
@@ -196,7 +399,7 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
         <div>
           <div className="text-2xl font-bold tracking-tight">LearningQuest</div>
           <div className="text-sm text-neutral-500">
-            可模組化英語學習 · 6 單元 · 遊戲化
+            可模組化英語學習 ·{UNITS.length} 單元 · 遊戲化
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -208,7 +411,7 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
             onClick={() => {
               setTab("challenge");
               setMode("select");
-              setLevel(unlockedCount); // 預選目前可玩的最後一關（下一關）
+              setLevel(calcUnlockedCount(uProg.challenge.levels, 10));
             }}
           >
             挑戰區
@@ -232,24 +435,18 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
           </Card>
           <Card>
             <div className="text-sm text-neutral-500">本單元 XP</div>
-            <div className="text-2xl font-bold">{uProg.xp}</div>
-            <div className="text-sm text-neutral-500">
-              總 XP：{progress.totalXP}
-            </div>
+            <div className="text-2xl font-bold">{uProg.xp
+}</div>
+            <div className="text-sm text-neutral-500">總 XP：{progress.totalXP}</div>
           </Card>
           <Card>
             <div className="text-sm text-neutral-500">快捷</div>
             <div className="flex gap-2 mt-2">
-              <button
-                onClick={reset}
-                className="px-3 py-2 rounded-xl border text-sm"
-              >
+              <button onClick={reset} className="px-3 py-2 rounded-xl border text-sm">
                 重置進度
               </button>
               <button
-                onClick={() =>
-                  alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")
-                }
+                onClick={() => alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")}
                 className="px-3 py-2 rounded-xl border text-sm"
               >
                 如何擴充？
@@ -260,8 +457,8 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
 
         {/* 單元選擇 */}
         <Card>
-          <SectionTitle title="選擇單元 (共 6)" />
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+          <SectionTitle title={`選擇單元 (共 ${UNITS.length})`} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
             {UNITS.map((u) => (
               <button
                 key={u.id}
@@ -298,38 +495,23 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
             <>
               <Card>
                 <div className="flex items-center gap-2 mb-3">
-                  <TabButton
-                    active={sub === "vocab"}
-                    onClick={() => setSub("vocab")}
-                  >
+                  <TabButton active={sub === "vocab"} onClick={() => setSub("vocab")}>
                     1. 單字
                   </TabButton>
-                  <TabButton
-                    active={sub === "grammar"}
-                    onClick={() => setSub("grammar")}
-                  >
+                  <TabButton active={sub === "grammar"} onClick={() => setSub("grammar")}>
                     2. 文法
                   </TabButton>
-                  <TabButton
-                    active={sub === "text"}
-                    onClick={() => setSub("text")}
-                  >
+                  <TabButton active={sub === "text"} onClick={() => setSub("text")}>
                     3. 課文
                   </TabButton>
                 </div>
 
                 {sub === "vocab" && (
                   <div className="flex items-center gap-2">
-                    <TabButton
-                      active={vocabView === "set"}
-                      onClick={() => setVocabView("set")}
-                    >
+                    <TabButton active={vocabView === "set"} onClick={() => setVocabView("set")}>
                       單字集
                     </TabButton>
-                    <TabButton
-                      active={vocabView === "quiz"}
-                      onClick={() => setVocabView("quiz")}
-                    >
+                    <TabButton active={vocabView === "quiz"} onClick={() => setVocabView("quiz")}>
                       4 選 1 小遊戲
                     </TabButton>
                   </div>
@@ -354,10 +536,7 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
 
                 {sub === "text" && (
                   <div className="flex items-center gap-2">
-                    <TabButton
-                      active={textView === "story"}
-                      onClick={() => setTextView("story")}
-                    >
+                    <TabButton active={textView === "story"} onClick={() => setTextView("story")}>
                       課文故事
                     </TabButton>
                     <TabButton
@@ -388,7 +567,14 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
                   />
                 ) : (
                   <VocabQuiz
-                    questions={makeVocabMCQ(unit, 8)}
+                    questions={/* 依單元取 10 題即時生成 */ unit.words
+                      .slice(0, 40)
+                      .map((w) => ({
+                        prompt: w.term,
+                        choices: [w.def, "—", "—", "—"],
+                        correctIndex: 0,
+                      }))
+                      .slice(0, 10)}
                     onFinished={(score) => {
                       addXP(unitId, score);
                       patchUnit(unitId, {
@@ -418,16 +604,13 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
                   />
                 ) : (
                   <ReorderSentenceGame
-                    target={unit.grammar[0]?.examples[0] ?? "I am a student."}
-                    onFinished={(ok) => {
-                      addXP(unitId, ok ? 5 : 2);
+                    targets={unit.grammar.flatMap((g) => g.examples ?? []).slice(0, 10)}
+                    onFinished={(score) => {
+                      addXP(unitId, score);
                       patchUnit(unitId, {
                         grammar: {
                           ...uProg.grammar,
-                          reorderBest: Math.max(
-                            uProg.grammar.reorderBest,
-                            ok ? 1 : 0
-                          ),
+                          reorderBest: Math.max(uProg.grammar.reorderBest, score),
                         },
                       });
                     }}
@@ -454,10 +637,7 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
                       patchUnit(unitId, {
                         text: {
                           ...uProg.text,
-                          arrangeBest: Math.max(
-                            uProg.text.arrangeBest,
-                            correct
-                          ),
+                          arrangeBest: Math.max(uProg.text.arrangeBest, correct),
                         },
                       });
                     }}
@@ -471,31 +651,39 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
             (mode === "select" ? (
               <LevelGrid
                 total={10}
-                unlockedCount={unlockedCount} // ✅ 兩星解鎖
+                unlockedCount={unlockedCount}
                 starsByLevel={starsByLevel}
                 onPick={(lv) => {
                   setLevel(lv);
                   setMode("play");
                 }}
               />
-            ) : // ✅isSnakeLevel選擇關卡 使用貪吃蛇；其餘關卡維持原本題目挑戰
-            isSnakeLevel ? (
+            ) : isSnakeLevel ? (
               <SnakeChallenge
-  key={`snake-${unitId}-${level}`}
-  title={`第 ${level} 關：貪吃蛇`}
-  totalTime={60}
-  words={unit.words}     // ← 使用當前單元的單字庫
-  targetScore={10}       // ← 必達門檻（達標立即通關、用來解鎖）
-  onFinish={handleChallengeFinish}
-/>
-
-            ) : (
-              <ChallengeRun
-                key={`${unitId}-${level}`}
-                unit={unit}
+                key={`snake-${unitId}-${level}`}
+                title={`第 ${level} 關：貪吃蛇`}
                 totalTime={60}
+                words={unit.words}
+                targetScore={10}
                 onFinish={handleChallengeFinish}
               />
+            ) : (
+              (() => {
+                const fixedSet = unitId === 1 && level === 1 ? fixedU1L1 : undefined;
+                return (
+                  <ChallengeRun
+                    key={`${unitId}-${level}`}
+                    unit={unit}
+                    // 若 ChallengeRun 支援「每題秒數」，請保留此 prop
+                    // @ts-ignore
+                    perQuestionTime={20}
+                    // ★ 固定題庫：Unit1 Level1
+                    fixedSet={fixedSet}
+                    // 若沒固定題庫，ChallengeRun 會自行出題
+                    onFinish={handleChallengeFinish}
+                  />
+                );
+              })()
             ))}
 
           {/* 獎章區 */}
@@ -506,6 +694,21 @@ const handleChallengeFinish = (score: number, timeUsed: number) => {
       <footer className="max-w-5xl mx-auto px-4 py-8 text-center text-sm text-neutral-500">
         © {new Date().getFullYear()} LearningQuest · 可自由調整的模組化原型
       </footer>
+
+      {/* 結算 Modal */}
+      {modalData && (
+        <ResultModal
+          open={modalOpen}
+          onClose={closeResultModal}
+          title={modalData.title}
+          score={modalData.score}
+          total={modalData.total}
+          stars={modalData.stars}
+          timeUsed={modalData.timeUsed}
+          passed={modalData.passed}
+          items={modalData.items}
+        />
+      )}
     </div>
   );
 }

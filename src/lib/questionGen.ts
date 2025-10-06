@@ -3,7 +3,7 @@ import type { MCQ, UnitConfig } from "../types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
-export const shuffle = <T,>(arr: T[]): T[] => {
+export const shuffle = <T>(arr: T[]): T[] => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -13,23 +13,42 @@ export const shuffle = <T,>(arr: T[]): T[] => {
 };
 
 export function makeVocabMCQ(unit: UnitConfig, count = 10): MCQ[] {
-  const pool = unit.words;
+  const all = (unit.words ?? []).filter(w => w?.term?.trim() && w?.def?.trim());
+  if (all.length === 0) return [];
+
+  const pool = shuffle(all); // 先打散整池
+  const take = Math.min(count, pool.length);
   const qs: MCQ[] = [];
-  for (let i = 0; i < Math.min(count, pool.length); i++) {
+
+  for (let i = 0; i < take; i++) {
     const correct = pool[i];
-    const distractors = shuffle(pool.filter((w) => w.term !== correct.term)).slice(0, 3);
-    const all = shuffle([correct.term, ...distractors.map((d) => d.term)]);
+
+    // 取 3 個非正解的干擾；不足則從全池補
+    const others = all.filter(w => w.term !== correct.term);
+    let distract = shuffle(others).slice(0, 3).map(w => w.term);
+
+    // 題庫太小時補到 3 個
+    let k = 0;
+    while (distract.length < 3 && all.length > 1 && k < all.length * 2) {
+      const extra = all[(Math.random() * all.length) | 0].term;
+      if (extra !== correct.term && !distract.includes(extra)) distract.push(extra);
+      k++;
+    }
+
+    const choices = shuffle([correct.term, ...distract].slice(0, 4));
     qs.push({
       id: `v-${unit.id}-${i}-${uid()}`,
       prompt: `「${correct.def}」的英文是哪一個？`,
-      choices: all,
-      correctIndex: all.indexOf(correct.term),
-      explain: correct.example,
+      choices,
+      correctIndex: choices.indexOf(correct.term),
       tag: "vocab",
+      // 不放 explain，VocabQuiz 只在有 explain 時才顯示提示
     });
   }
-  return shuffle(qs);
+
+  return qs;
 }
+
 
 export function makeBeVerbMCQ(unit: UnitConfig, count = 5): MCQ[] {
   const samples = [

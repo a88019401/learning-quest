@@ -1,3 +1,6 @@
+2025/10/7 筆記
+學習區 大致上OK了 挑戰區 我固定住json 檔案 然後 讓遊戲完結後會有即時反饋 看錯的題目 跟內容詳解 進行一個學習的動作
+
 2025/9/19 筆記 
 questionGen.ts的用途是 給 VocabQuiz.tsx和ChallengeRun.tsx製造四選一選擇題用的
 然後 學習區 檔案靠 units.ts 挑戰區 則要靠 public\challenges\unit-1\level-1.json 慢慢建構起來

@@ -1,48 +1,125 @@
 // components/ChallengeRun.tsx
-import { useEffect, useMemo, useRef, useState } from "react";import type { UnitConfig } from "../types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { UnitConfig } from "../types";
 import { Card, SectionTitle } from "./ui";
 import { makeChallengeSet } from "../lib/questionGen";
 
-function useCountdown(secs: number, running: boolean) {
+// ---- 題目/回顧型別（在這檔內就好，避免大改 types.ts）----
+export type MCQ = {
+  id?: string;
+  prompt: string;
+  choices: string[];
+  correctIndex: number;
+  explain?: string;
+  tag?: string;
+};
+
+export type RunReportItem = {
+  id?: string;
+  prompt: string;
+  choices: string[];
+  correctIndex: number;
+  pickedIndex: number | null; // null => 超時/未作答
+  explain?: string;
+  isCorrect: boolean;
+};
+
+export type RunReport = { items: RunReportItem[] };
+
+// 單題倒數（每題秒數）
+function usePerQuestionTimer(secs: number, runningKey: string | number) {
   const [left, setLeft] = useState(secs);
-  const ref = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!running) return;
+    // 切題或重新開始時重置
     setLeft(secs);
-    const tick = () => setLeft((l) => (l <= 0 ? 0 : l - 1));
-    ref.current = window.setInterval(tick, 1000) as unknown as number;
+    if (timerRef.current) window.clearInterval(timerRef.current);
+
+    timerRef.current = window.setInterval(() => {
+      setLeft((l) => (l <= 0 ? 0 : l - 1));
+    }, 1000) as unknown as number;
+
     return () => {
-      if (ref.current) window.clearInterval(ref.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [secs, running]);
+  }, [secs, runningKey]);
+
   return left;
 }
 
 type Props = {
   unit: UnitConfig;
-  onFinish: (score: number, timeUsed: number) => void;
-  totalTime?: number;
+  // 若有固定題庫就吃這個（例如 unit1/level1），否則用 makeChallengeSet
+  fixedSet?: {
+    meta?: { time?: number; title?: string };
+    questions: MCQ[];
+  };
+  // 每題秒數（建議 20）
+  perQuestionTime?: number;
+  // 通關後回傳「分數、花費秒數、詳解清單」
+  onFinish: (score: number, timeUsed: number, report?: RunReport) => void;
 };
 
-export default function ChallengeRun({ unit, onFinish, totalTime = 60 }: Props) {
-  const QUESTIONS = useMemo(() => makeChallengeSet(unit, 10), [unit.id]);
+export default function ChallengeRun({
+  unit,
+  fixedSet,
+  perQuestionTime = 20,
+  onFinish,
+}: Props) {
+  // 題庫
+  const QUESTIONS: MCQ[] = useMemo(
+    () => fixedSet?.questions ?? makeChallengeSet(unit, 10),
+    [unit.id, fixedSet]
+  );
 
+  // 狀態
   const [started, setStarted] = useState(false);
   const [idx, setIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [reveal, setReveal] = useState(false);
+  const [report, setReport] = useState<RunReportItem[]>([]);
+  const startedAt = useRef<number>(0);
 
-  const left = useCountdown(totalTime, started);
-
-  // 時間到：結束（timeUsed = totalTime）
-  useEffect(() => {
-    if (started && left === 0) {
-      onFinish(score, totalTime);
-    }
-  }, [left, started]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 每題倒數：依「目前題號＋started」重置
+  const left = usePerQuestionTimer(perQuestionTime, `${started}-${idx}`);
 
   const cur = QUESTIONS[idx];
+
+  // 超時 -> 直接記錄為未作答並進下一題 / 或結束
+  useEffect(() => {
+    if (!started) return;
+    if (left === 0 && !reveal) {
+      // 未作答記錄
+const item: RunReportItem = {
+  id: cur.id,
+  prompt: cur.prompt,
+  choices: cur.choices,
+  correctIndex: cur.correctIndex,
+  pickedIndex: null,
+  explain: cur.explain,
+  isCorrect: false,
+  // ★ 新增：把題目上的 tag 帶出來
+  // @ts-ignore
+  tag: (cur as any).tag,
+};
+      setReport((r) => [...r, item]);
+
+      setReveal(true);
+      // 稍微顯示一下正解色塊（跟點選行為一致）
+      setTimeout(() => {
+        if (idx + 1 >= QUESTIONS.length) {
+          finishRun();
+        } else {
+          setIdx((n) => n + 1);
+          setSelectedIdx(null);
+          setReveal(false);
+        }
+      }, 400);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left, started]);
 
   function start() {
     setStarted(true);
@@ -50,15 +127,36 @@ export default function ChallengeRun({ unit, onFinish, totalTime = 60 }: Props) 
     setScore(0);
     setSelectedIdx(null);
     setReveal(false);
+    setReport([]);
+    startedAt.current = Date.now();
+  }
+
+  function finishRun() {
+    const used = Math.max(1, Math.round((Date.now() - startedAt.current) / 1000));
+    onFinish(score, used, { items: report });
   }
 
   function choose(i: number) {
     if (!started || reveal) return;
     setSelectedIdx(i);
-    const correct = i === cur.correctIndex;
 
-    // 分數先加起來（之後 450ms 進下一題）
+    const correct = i === cur.correctIndex;
     if (correct) setScore((s) => s + 1);
+
+    // 紀錄本題詳解
+const item: RunReportItem = {
+  id: cur.id,
+  prompt: cur.prompt,
+  choices: cur.choices,
+  correctIndex: cur.correctIndex,
+  pickedIndex: i,
+  explain: cur.explain,
+  isCorrect: correct,
+  // ★ 新增
+  // @ts-ignore
+  tag: (cur as any).tag,
+};
+    setReport((r) => [...r, item]);
 
     // 顯示即時回饋：選到者紅或綠 & 正解一定綠
     setReveal(true);
@@ -66,9 +164,7 @@ export default function ChallengeRun({ unit, onFinish, totalTime = 60 }: Props) 
     setTimeout(() => {
       // 進下一題或結束
       if (idx + 1 >= QUESTIONS.length) {
-        const timeUsed = totalTime - left;
-        const finalScore = correct ? score + 1 : score; // 這題若對，已上面 setScore，但保險起見
-        onFinish(finalScore, timeUsed);
+        finishRun();
       } else {
         setIdx((n) => n + 1);
         setSelectedIdx(null);
@@ -81,16 +177,18 @@ export default function ChallengeRun({ unit, onFinish, totalTime = 60 }: Props) 
     <Card>
       <div className="flex items-center justify-between">
         <SectionTitle
-          title={`挑戰題 (${idx + 1}/${QUESTIONS.length})`}
-          desc={`限時 ${totalTime} 秒`}
+          title={`挑戰題 (${started ? idx + 1 : 0}/${QUESTIONS.length})`}
+          desc={`每題 ${perQuestionTime} 秒`}
         />
-        <div
-          className={`px-3 py-1 rounded-xl text-sm font-semibold ${
-            left <= 10 ? "bg-red-100 text-red-700" : "bg-neutral-100 text-neutral-700"
-          }`}
-        >
-          ⏱ 剩餘 {left}s
-        </div>
+        {started ? (
+          <div
+            className={`px-3 py-1 rounded-xl text-sm font-semibold ${
+              left <= 5 ? "bg-red-100 text-red-700" : "bg-neutral-100 text-neutral-700"
+            }`}
+          >
+            ⏱ 剩餘 {left}s
+          </div>
+        ) : null}
       </div>
 
       {!started ? (
@@ -127,7 +225,7 @@ export default function ChallengeRun({ unit, onFinish, totalTime = 60 }: Props) 
               return (
                 <button
                   key={i}
-                  disabled={reveal} // 顯示回饋期間先鎖點
+                  disabled={reveal}
                   onClick={() => choose(i)}
                   className={cls}
                 >
