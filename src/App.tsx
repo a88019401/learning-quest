@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { UNITS } from "./data/units";
 import type { UnitConfig, UnitId, MCQ } from "./types";
 import { useProgress } from "./state/progress";
+import { makeVocabMCQ } from "./lib/questionGen";
 
 import { TabButton, Card, SectionTitle } from "./components/ui";
 import VocabSet from "./components/VocabSet";
@@ -15,6 +16,8 @@ import BadgesView from "./components/BadgesView";
 
 // 挑戰
 import ChallengeRun from "./components/ChallengeRun";
+import type { RunReport } from "./components/ChallengeRun";
+
 import SnakeChallenge from "./components/SnakeChallenge";
 
 // 固定 JSON 題庫（Unit 1 · Level 1）
@@ -43,14 +46,7 @@ type ChallengeItemResult = {
   tag?: string;
 };
 
-type ChallengeReport = {
-  unitId: UnitId;
-  level: number;
-  total: number;
-  score: number;
-  timeUsed: number;
-  items: ChallengeItemResult[];
-};
+
 
 const fixedU1L1: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level1;
 
@@ -290,58 +286,38 @@ export default function App() {
   const [pendingNextLevel, setPendingNextLevel] = useState<number | null>(null);
 
   // —— 結算與進度寫回 —— //
-function handleChallengeFinish(
-  arg1: any,
-  arg2?: number,
-  arg3?: { items?: ChallengeItemResult[] } // ★ 新增：ChallengeRun 回傳的詳解
-) {
-  // 允許兩種來源：
-  // 1) ChallengeRun（分數/時間/詳解在第1,2,3參數）
-  // 2) SnakeChallenge（只給 score, timeUsed）
-  let report: ChallengeReport;
-
-  if (typeof arg1 === "object" && arg1 && "score" in arg1 && "items" in arg1) {
-    // 保留相容：若未來有元件直接給完整 report 物件
-    report = arg1 as ChallengeReport;
-  } else {
-    const score = (arg1 as number) ?? 0;
-    const timeUsed = arg2 ?? 0;
-    const items = Array.isArray(arg3?.items) ? (arg3!.items as ChallengeItemResult[]) : [];
-    report = {
-      unitId,
-      level,
-      total: 10,
-      score,
-      timeUsed,
-      items, // ★ 接住每題詳解
-    };
-  }
+function handleChallengeFinish(score: number, timeUsed: number, report?: RunReport) {
+  // 取出本輪每題詳解（來自 ChallengeRun）
+  const itemsFromRun = (report?.items ?? []).map((it: any) => ({
+    ...it,
+    // 正規化：把 isCorrect 轉成 correct，方便 ResultModal 使用
+    correct: typeof it.correct === "boolean" ? it.correct : !!it.isCorrect,
+  }));
 
   // 本輪星等（顯示在 modal）
-  const starsThisRun = computeLevelStars(report.score);
-  // 通過條件（蛇關卡需滿分10；非蛇關卡≥2★）
-  const snakePassed = isSnakeLevel ? report.score >= 10 : false;
+  const starsThisRun = computeLevelStars(score);
+
+  // 通過條件：蛇關卡需 >=10；其餘關卡 ≥2★
+  const snakePassed = isSnakeLevel ? score >= 10 : false;
   const nonSnakePassed = starsThisRun >= 2;
   const passed = isSnakeLevel ? snakePassed : nonSnakePassed;
 
-  // 進度（歷史最佳）
+  // 歷史最佳（寫回 progress）
   const prevLv = uProg.challenge.levels?.[level] as
     | { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }
     | undefined;
 
   const newLv = {
-    bestScore: Math.max(prevLv?.bestScore ?? 0, report.score),
-    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, report.timeUsed) : report.timeUsed,
-    stars: Math.max(prevLv?.stars ?? 0, starsThisRun), // ★ 寫入歷史最佳星等
-    passed: prevLv?.passed === true ? true : passed,
+    bestScore: Math.max(prevLv?.bestScore ?? 0, score),
+    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, timeUsed) : timeUsed,
+    stars: Math.max(prevLv?.stars ?? 0, starsThisRun), // 寫入「歷史最佳星等」
+    passed: prevLv?.passed === true ? true : passed,   // 一旦通過永久 true
   };
 
-  // 單元彙總
-  const bestScore = Math.max(uProg.challenge.bestScore, report.score);
+  const bestScore = Math.max(uProg.challenge.bestScore, score);
   const bestTime =
-    uProg.challenge.bestTimeSec === 0 ? report.timeUsed : Math.min(uProg.challenge.bestTimeSec, report.timeUsed);
+    uProg.challenge.bestTimeSec === 0 ? timeUsed : Math.min(uProg.challenge.bestTimeSec, timeUsed);
 
-  // 寫回
   const nextLevels = {
     ...(uProg.challenge.levels || {}),
     [level]: newLv,
@@ -360,28 +336,24 @@ function handleChallengeFinish(
   });
 
   // 徽章 & XP
-  if (report.score === 10) awardBadge("PERFECT_10");
-  if (report.timeUsed <= 40) awardBadge("SPEEDSTER");
-  addXP(unitId, report.score * 2);
+  if (score === 10) awardBadge("PERFECT_10");
+  if (timeUsed <= 40) awardBadge("SPEEDSTER");
+  addXP(unitId, score * 2);
 
-// ★ 開啟結算 modal（本輪星等＋每題詳解）
-setModalData({
-  title: `Unit ${unitId} · Level ${level}`,
-  score: report.score,
-  total: report.total,
-  stars: starsThisRun,
-  timeUsed: report.timeUsed,
-  passed,
-  // ★ 正規化：把 isCorrect 轉成 correct，讓 ResultModal 可直接使用
-  items: (report.items || []).map((it: any) => ({
-    ...it,
-    correct: typeof it.correct === "boolean" ? it.correct : !!it.isCorrect,
-  })),
-});
-
+  // 打開本輪結算（顯示本輪星等＆詳解）
+  setModalData({
+    title: `Unit ${unitId} · Level ${level}`,
+    score,
+    total: report?.items?.length ?? 10,
+    stars: starsThisRun,
+    timeUsed,
+    passed,
+    items: itemsFromRun,
+  });
   setPendingNextLevel(nextUnlocked);
   setModalOpen(true);
 }
+
 
 
   function closeResultModal() {
@@ -566,25 +538,22 @@ setModalData({
                     }}
                   />
                 ) : (
-                  <VocabQuiz
-                    questions={/* 依單元取 10 題即時生成 */ unit.words
-                      .slice(0, 40)
-                      .map((w) => ({
-                        prompt: w.term,
-                        choices: [w.def, "—", "—", "—"],
-                        correctIndex: 0,
-                      }))
-                      .slice(0, 10)}
-                    onFinished={(score) => {
-                      addXP(unitId, score);
-                      patchUnit(unitId, {
-                        vocab: {
-                          ...uProg.vocab,
-                          quizBest: Math.max(uProg.vocab.quizBest, score),
-                        },
-                      });
-                    }}
-                  />
+<VocabQuiz
+  questions={makeVocabMCQ(unit, 10).map((q, i) => ({
+    ...q,
+    id: q.id ?? `vocab-${unit.id}-${i}`,  // 補上必填的 id
+  }))}
+  onFinished={(score) => {
+    addXP(unitId, score);
+    patchUnit(unitId, {
+      vocab: {
+        ...uProg.vocab,
+        quizBest: Math.max(uProg.vocab.quizBest, score),
+      },
+    });
+  }}
+/>
+
                 ))}
 
               {/* 內容：文法 */}
