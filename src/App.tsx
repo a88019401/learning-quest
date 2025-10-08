@@ -59,7 +59,7 @@ type ChallengeItemResult = {
 const fixedU1L1: {
   meta?: { time?: number; title?: string };
   questions: MCQ[];
-} = level1;
+} = level1;/* 預先載入，避免每次切換關卡才載入 
 const fixedU1L2: {
   meta?: { time?: number; title?: string };
   questions: MCQ[];
@@ -75,7 +75,7 @@ const fixedU1L4: {
 const fixedU1L5: {
   meta?: { time?: number; title?: string };
   questions: MCQ[];
-} = level5;
+} = level5;*/
 
 /* -----------------------------
    星等 / 解鎖規則
