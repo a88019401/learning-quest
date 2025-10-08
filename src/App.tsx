@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { UNITS } from "./data/units";
 import type { UnitConfig, UnitId, MCQ } from "./types";
 import { useProgress } from "./state/progress";
@@ -19,18 +19,28 @@ import ChallengeRun from "./components/ChallengeRun";
 import type { RunReport } from "./components/ChallengeRun";
 
 import SnakeChallenge from "./components/SnakeChallenge";
+import type { SnakeReport } from "./components/SnakeChallenge";
 
 // 固定 JSON 題庫（Unit 1 · Level 1）
 // 若 tsconfig 已開 resolveJsonModule，下面可直接 import；否則加 // @ts-ignore
 // @ts-ignore
 import level1 from "./data/challenges/unit-1/level-1.json";
+{/*// @ts-ignore 題目設定好之後開啟
+import level2 from "./data/challenges/unit-1/level-2.json";
+// @ts-ignore
+import level3 from "./data/challenges/unit-1/level-3.json";
+// @ts-ignore
+import level4 from "./data/challenges/unit-1/level-4.json";
+// @ts-ignore
+import level5 from "./data/challenges/unit-1/level-5.json";*/}
+
 
 /* -----------------------------
    類型（僅供本檔使用）
 ------------------------------ */
 type Tab = "learn" | "challenge" | "badges";
 type LearnSubTab = "vocab" | "grammar" | "text";
-type VocabView = "set" | "quiz";
+type VocabView = "set" | "quiz" | "snake";
 type GrammarView = "explain" | "reorder";
 type TextView = "story" | "arrange";
 type ChallengeMode = "select" | "play";
@@ -46,9 +56,15 @@ type ChallengeItemResult = {
   tag?: string;
 };
 
+const fixedU1L1: {
+  meta?: { time?: number; title?: string };
+  questions: MCQ[];
+} = level1;
+const fixedU1L2: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level2;
+const fixedU1L3: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level3;
+const fixedU1L4: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level4;
+const fixedU1L5: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level5;
 
-
-const fixedU1L1: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level1;
 
 /* -----------------------------
    星等 / 解鎖規則
@@ -203,15 +219,26 @@ function ResultModal({
                   const picked =
                     it.pickedIndex === null
                       ? "（未作答）"
-                      : `${letter(it.pickedIndex)}. ${it.choices[it.pickedIndex]}`;
-                  const correct = `${letter(it.correctIndex)}. ${it.choices[it.correctIndex]}`;
+                      : `${letter(it.pickedIndex)}. ${
+                          it.choices[it.pickedIndex]
+                        }`;
+                  const correct = `${letter(it.correctIndex)}. ${
+                    it.choices[it.correctIndex]
+                  }`;
                   return (
-                    <div key={it.id ?? `i-${i}`} className="rounded-xl border p-3">
+                    <div
+                      key={it.id ?? `i-${i}`}
+                      className="rounded-xl border p-3"
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-sm font-medium">
                           {i + 1}. {it.prompt}
                         </div>
-                        <div className={`text-sm ${it.correct ? "text-green-600" : "text-red-600"}`}>
+                        <div
+                          className={`text-sm ${
+                            it.correct ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
                           {it.correct ? "✔️ 正確" : "❌ 錯誤"}
                         </div>
                       </div>
@@ -227,7 +254,9 @@ function ResultModal({
                         </div>
                       )}
                       {it.tag && (
-                        <div className="mt-1 text-xs text-neutral-500">分類：{it.tag}</div>
+                        <div className="mt-1 text-xs text-neutral-500">
+                          分類：{it.tag}
+                        </div>
                       )}
                     </div>
                   );
@@ -256,9 +285,6 @@ export default function App() {
   // 挑戰區
   const [mode, setMode] = useState<ChallengeMode>("select");
   const [level, setLevel] = useState(1);
-  // 指定哪些關卡使用貪吃蛇
-  const snakeLevels = useMemo(() => new Set<number>([2, 4, 6]), []);
-  const isSnakeLevel = snakeLevels.has(level);
 
   // 資料與進度
   const unit: UnitConfig = UNITS.find((u) => u.id === unitId)!;
@@ -286,75 +312,95 @@ export default function App() {
   const [pendingNextLevel, setPendingNextLevel] = useState<number | null>(null);
 
   // —— 結算與進度寫回 —— //
-function handleChallengeFinish(score: number, timeUsed: number, report?: RunReport) {
-  // 取出本輪每題詳解（來自 ChallengeRun）
-  const itemsFromRun = (report?.items ?? []).map((it: any) => ({
-    ...it,
-    // 正規化：把 isCorrect 轉成 correct，方便 ResultModal 使用
-    correct: typeof it.correct === "boolean" ? it.correct : !!it.isCorrect,
-  }));
+  function handleChallengeFinish(
+    score: number,
+    timeUsed: number,
+    report?: RunReport
+  ) {
+    // 取出本輪每題詳解（來自 ChallengeRun）
+    const itemsFromRun = (report?.items ?? []).map((it: any) => ({
+      ...it,
+      // 正規化：把 isCorrect 轉成 correct，方便 ResultModal 使用
+      correct: typeof it.correct === "boolean" ? it.correct : !!it.isCorrect,
+    }));
 
-  // 本輪星等（顯示在 modal）
-  const starsThisRun = computeLevelStars(score);
+    // 本輪星等（顯示在 modal）
+    const starsThisRun = computeLevelStars(score);
 
-  // 通過條件：蛇關卡需 >=10；其餘關卡 ≥2★
-  const snakePassed = isSnakeLevel ? score >= 10 : false;
-  const nonSnakePassed = starsThisRun >= 2;
-  const passed = isSnakeLevel ? snakePassed : nonSnakePassed;
+    // 通過條件：關卡 ≥2★
+    const passed = starsThisRun >= 2;
 
-  // 歷史最佳（寫回 progress）
-  const prevLv = uProg.challenge.levels?.[level] as
-    | { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }
-    | undefined;
+    // 歷史最佳（寫回 progress）
+    const prevLv = uProg.challenge.levels?.[level] as
+      | {
+          bestScore: number;
+          bestTimeSec: number;
+          stars: number;
+          passed?: boolean;
+        }
+      | undefined;
 
-  const newLv = {
-    bestScore: Math.max(prevLv?.bestScore ?? 0, score),
-    bestTimeSec: prevLv?.bestTimeSec ? Math.min(prevLv.bestTimeSec, timeUsed) : timeUsed,
-    stars: Math.max(prevLv?.stars ?? 0, starsThisRun), // 寫入「歷史最佳星等」
-    passed: prevLv?.passed === true ? true : passed,   // 一旦通過永久 true
-  };
+    const newLv = {
+      bestScore: Math.max(prevLv?.bestScore ?? 0, score),
+      bestTimeSec: prevLv?.bestTimeSec
+        ? Math.min(prevLv.bestTimeSec, timeUsed)
+        : timeUsed,
+      stars: Math.max(prevLv?.stars ?? 0, starsThisRun), // 寫入「歷史最佳星等」
+      passed: prevLv?.passed === true ? true : passed, // 一旦通過永久 true
+    };
 
-  const bestScore = Math.max(uProg.challenge.bestScore, score);
-  const bestTime =
-    uProg.challenge.bestTimeSec === 0 ? timeUsed : Math.min(uProg.challenge.bestTimeSec, timeUsed);
+    const bestScore = Math.max(uProg.challenge.bestScore, score);
+    const bestTime =
+      uProg.challenge.bestTimeSec === 0
+        ? timeUsed
+        : Math.min(uProg.challenge.bestTimeSec, timeUsed);
 
-  const nextLevels = {
-    ...(uProg.challenge.levels || {}),
-    [level]: newLv,
-  } as Record<number, { bestScore: number; bestTimeSec: number; stars: number; passed?: boolean }>;
+    const nextLevels = {
+      ...(uProg.challenge.levels || {}),
+      [level]: newLv,
+    } as Record<
+      number,
+      {
+        bestScore: number;
+        bestTimeSec: number;
+        stars: number;
+        passed?: boolean;
+      }
+    >;
 
-  const nextUnlocked = calcUnlockedCount(nextLevels, 10);
-  const nextCleared = Math.max(uProg.challenge.clearedLevels, nextUnlocked - 1);
+    const nextUnlocked = calcUnlockedCount(nextLevels, 10);
+    const nextCleared = Math.max(
+      uProg.challenge.clearedLevels,
+      nextUnlocked - 1
+    );
 
-  patchUnit(unitId, {
-    challenge: {
-      clearedLevels: nextCleared,
-      bestTimeSec: bestTime,
-      bestScore,
-      levels: nextLevels,
-    },
-  });
+    patchUnit(unitId, {
+      challenge: {
+        clearedLevels: nextCleared,
+        bestTimeSec: bestTime,
+        bestScore,
+        levels: nextLevels,
+      },
+    });
 
-  // 徽章 & XP
-  if (score === 10) awardBadge("PERFECT_10");
-  if (timeUsed <= 40) awardBadge("SPEEDSTER");
-  addXP(unitId, score * 2);
+    // 徽章 & XP
+    if (score === 10) awardBadge("PERFECT_10");
+    if (timeUsed <= 40) awardBadge("SPEEDSTER");
+    addXP(unitId, score * 2);
 
-  // 打開本輪結算（顯示本輪星等＆詳解）
-  setModalData({
-    title: `Unit ${unitId} · Level ${level}`,
-    score,
-    total: report?.items?.length ?? 10,
-    stars: starsThisRun,
-    timeUsed,
-    passed,
-    items: itemsFromRun,
-  });
-  setPendingNextLevel(nextUnlocked);
-  setModalOpen(true);
-}
-
-
+    // 打開本輪結算（顯示本輪星等＆詳解）
+    setModalData({
+      title: `Unit ${unitId} · Level ${level}`,
+      score,
+      total: report?.items?.length ?? 10,
+      stars: starsThisRun,
+      timeUsed,
+      passed,
+      items: itemsFromRun,
+    });
+    setPendingNextLevel(nextUnlocked);
+    setModalOpen(true);
+  }
 
   function closeResultModal() {
     setModalOpen(false);
@@ -407,18 +453,24 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
           </Card>
           <Card>
             <div className="text-sm text-neutral-500">本單元 XP</div>
-            <div className="text-2xl font-bold">{uProg.xp
-}</div>
-            <div className="text-sm text-neutral-500">總 XP：{progress.totalXP}</div>
+            <div className="text-2xl font-bold">{uProg.xp}</div>
+            <div className="text-sm text-neutral-500">
+              總 XP：{progress.totalXP}
+            </div>
           </Card>
           <Card>
             <div className="text-sm text-neutral-500">快捷</div>
             <div className="flex gap-2 mt-2">
-              <button onClick={reset} className="px-3 py-2 rounded-xl border text-sm">
+              <button
+                onClick={reset}
+                className="px-3 py-2 rounded-xl border text-sm"
+              >
                 重置進度
               </button>
               <button
-                onClick={() => alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")}
+                onClick={() =>
+                  alert("請在 data/units.ts 中替換成你的題庫即可擴充 6 單元。")
+                }
                 className="px-3 py-2 rounded-xl border text-sm"
               >
                 如何擴充？
@@ -467,24 +519,42 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
             <>
               <Card>
                 <div className="flex items-center gap-2 mb-3">
-                  <TabButton active={sub === "vocab"} onClick={() => setSub("vocab")}>
+                  <TabButton
+                    active={sub === "vocab"}
+                    onClick={() => setSub("vocab")}
+                  >
                     1. 單字
                   </TabButton>
-                  <TabButton active={sub === "grammar"} onClick={() => setSub("grammar")}>
+                  <TabButton
+                    active={sub === "grammar"}
+                    onClick={() => setSub("grammar")}
+                  >
                     2. 文法
                   </TabButton>
-                  <TabButton active={sub === "text"} onClick={() => setSub("text")}>
+                  <TabButton
+                    active={sub === "text"}
+                    onClick={() => setSub("text")}
+                  >
                     3. 課文
                   </TabButton>
                 </div>
 
                 {sub === "vocab" && (
                   <div className="flex items-center gap-2">
-                    <TabButton active={vocabView === "set"} onClick={() => setVocabView("set")}>
+                    <TabButton
+                      active={vocabView === "set"}
+                      onClick={() => setVocabView("set")}
+                    >
                       單字集
                     </TabButton>
-                    <TabButton active={vocabView === "quiz"} onClick={() => setVocabView("quiz")}>
+                    {/*<TabButton active={vocabView === "quiz"} onClick={() => setVocabView("quiz")}>
                       4 選 1 小遊戲
+                    </TabButton>*/}
+                    <TabButton
+                      active={vocabView === "snake"}
+                      onClick={() => setVocabView("snake")}
+                    >
+                      貪吃蛇
                     </TabButton>
                   </div>
                 )}
@@ -508,7 +578,10 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
 
                 {sub === "text" && (
                   <div className="flex items-center gap-2">
-                    <TabButton active={textView === "story"} onClick={() => setTextView("story")}>
+                    <TabButton
+                      active={textView === "story"}
+                      onClick={() => setTextView("story")}
+                    >
                       課文故事
                     </TabButton>
                     <TabButton
@@ -537,23 +610,68 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
                       });
                     }}
                   />
-                ) : (
-<VocabQuiz
-  questions={makeVocabMCQ(unit, 10).map((q, i) => ({
-    ...q,
-    id: q.id ?? `vocab-${unit.id}-${i}`,  // 補上必填的 id
-  }))}
-  onFinished={(score) => {
-    addXP(unitId, score);
-    patchUnit(unitId, {
-      vocab: {
-        ...uProg.vocab,
-        quizBest: Math.max(uProg.vocab.quizBest, score),
-      },
-    });
-  }}
-/>
+                ) : vocabView === "snake" ? (
+                  <SnakeChallenge
+                    key={`snake-learn-${unitId}`}
+                    title={`單字練習：貪吃蛇（10題）`}
+                    totalTime={60}
+                    words={unit.words}
+                    targetScore={7} // 建議 7 分作為過關門檻（可調）
+                    onFinish={(score /*, timeUsed*/) => {
+                      // 與 4選1 一致：加 XP、寫入 vocab.quizBest（若要分開統計再另外加欄位）
+                      addXP(unitId, score);
+                      patchUnit(unitId, {
+                        vocab: {
+                          ...uProg.vocab,
+                          quizBest: Math.max(uProg.vocab.quizBest, score),
+                        },
+                      });
+                    }}
+                    onReport={(r: SnakeReport) => {
+                      const items: ChallengeItemResult[] = r.logs.map((log) => {
+                        const correctIndex = log.options.indexOf(
+                          log.correctTerm
+                        );
+                        const picked = log.options.indexOf(log.selectedTerm);
+                        return {
+                          id: `snake-${unitId}-${log.round}`,
+                          prompt: log.prompt,
+                          choices: log.options,
+                          correctIndex: correctIndex >= 0 ? correctIndex : 0, // 理論上應該找得到；找不到就先防呆到 0
+                          pickedIndex: picked >= 0 ? picked : null, // -1 轉成 null，Modal 會顯示「（未作答）」
+                          correct: log.isCorrect,
+                          tag: "vocab",
+                        };
+                      });
 
+                      setModalData({
+                        title: r.title || `單字練習：貪吃蛇`,
+                        score: r.correct,
+                        total: r.totalQuestions,
+                        stars: computeLevelStars(r.correct),
+                        timeUsed: r.usedTime,
+                        passed: r.passed,
+                        items,
+                      });
+                      setModalOpen(true);
+                    }}
+                  />
+                ) : (
+                  <VocabQuiz
+                    questions={makeVocabMCQ(unit, 10).map((q, i) => ({
+                      ...q,
+                      id: q.id ?? `vocab-${unit.id}-${i}`, // 補上 id
+                    }))}
+                    onFinished={(score) => {
+                      addXP(unitId, score);
+                      patchUnit(unitId, {
+                        vocab: {
+                          ...uProg.vocab,
+                          quizBest: Math.max(uProg.vocab.quizBest, score),
+                        },
+                      });
+                    }}
+                  />
                 ))}
 
               {/* 內容：文法 */}
@@ -573,13 +691,18 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
                   />
                 ) : (
                   <ReorderSentenceGame
-                    targets={unit.grammar.flatMap((g) => g.examples ?? []).slice(0, 10)}
+                    targets={unit.grammar
+                      .flatMap((g) => g.examples ?? [])
+                      .slice(0, 10)}
                     onFinished={(score) => {
                       addXP(unitId, score);
                       patchUnit(unitId, {
                         grammar: {
                           ...uProg.grammar,
-                          reorderBest: Math.max(uProg.grammar.reorderBest, score),
+                          reorderBest: Math.max(
+                            uProg.grammar.reorderBest,
+                            score
+                          ),
                         },
                       });
                     }}
@@ -606,7 +729,10 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
                       patchUnit(unitId, {
                         text: {
                           ...uProg.text,
-                          arrangeBest: Math.max(uProg.text.arrangeBest, correct),
+                          arrangeBest: Math.max(
+                            uProg.text.arrangeBest,
+                            correct
+                          ),
                         },
                       });
                     }}
@@ -627,34 +753,19 @@ function handleChallengeFinish(score: number, timeUsed: number, report?: RunRepo
                   setMode("play");
                 }}
               />
-            ) : isSnakeLevel ? (
-              <SnakeChallenge
-                key={`snake-${unitId}-${level}`}
-                title={`第 ${level} 關：貪吃蛇`}
-                totalTime={60}
-                words={unit.words}
-                targetScore={10}
-                onFinish={handleChallengeFinish}
-              />
             ) : (
-              (() => {
-                const fixedSet = unitId === 1 && level === 1 ? fixedU1L1 : undefined;
-                return (
-                  <ChallengeRun
-                    key={`${unitId}-${level}`}
-                    unit={unit}
-                    // 若 ChallengeRun 支援「每題秒數」，請保留此 prop
-                    // @ts-ignore
-                    perQuestionTime={20}
-                    // ★ 固定題庫：Unit1 Level1
-                    fixedSet={fixedSet}
-                    // 若沒固定題庫，ChallengeRun 會自行出題
-                    onFinish={handleChallengeFinish}
-                  />
-                );
-              })()
+              <ChallengeRun
+                key={`${unitId}-${level}`}
+                unit={unit}
+                // @ts-ignore
+                perQuestionTime={20}
+  fixedSet={
+    unitId === 1
+      ? ({ 1: fixedU1L1, 2: fixedU1L2, 3: fixedU1L3, 4: fixedU1L4, 5: fixedU1L5 } as const)[level]
+      : undefined
+  }                onFinish={handleChallengeFinish}
+              />
             ))}
-
           {/* 獎章區 */}
           {tab === "badges" && <BadgesView progress={progress} />}
         </div>
