@@ -775,10 +775,10 @@ export default function App() {
                     ? (
                         {
                           1: fixedU1L1,
-                          2: fixedU1L2,
+                          /*2: fixedU1L2,
                           3: fixedU1L3,
                           4: fixedU1L4,
-                          5: fixedU1L5,
+                          5: fixedU1L5,*/
                         } as const
                       )[level]
                     : undefined
