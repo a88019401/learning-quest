@@ -25,15 +25,15 @@ import type { SnakeReport } from "./components/SnakeChallenge";
 // 若 tsconfig 已開 resolveJsonModule，下面可直接 import；否則加 // @ts-ignore
 // @ts-ignore
 import level1 from "./data/challenges/unit-1/level-1.json";
-{/*// @ts-ignore 題目設定好之後開啟
+
+  /*// @ts-ignore 題目設定好之後開啟
 import level2 from "./data/challenges/unit-1/level-2.json";
 // @ts-ignore
 import level3 from "./data/challenges/unit-1/level-3.json";
 // @ts-ignore
 import level4 from "./data/challenges/unit-1/level-4.json";
 // @ts-ignore
-import level5 from "./data/challenges/unit-1/level-5.json";*/}
-
+import level5 from "./data/challenges/unit-1/level-5.json";*/
 
 /* -----------------------------
    類型（僅供本檔使用）
@@ -60,11 +60,22 @@ const fixedU1L1: {
   meta?: { time?: number; title?: string };
   questions: MCQ[];
 } = level1;
-const fixedU1L2: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level2;
-const fixedU1L3: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level3;
-const fixedU1L4: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level4;
-const fixedU1L5: { meta?: { time?: number; title?: string }; questions: MCQ[] } = level5;
-
+const fixedU1L2: {
+  meta?: { time?: number; title?: string };
+  questions: MCQ[];
+} = level2;
+const fixedU1L3: {
+  meta?: { time?: number; title?: string };
+  questions: MCQ[];
+} = level3;
+const fixedU1L4: {
+  meta?: { time?: number; title?: string };
+  questions: MCQ[];
+} = level4;
+const fixedU1L5: {
+  meta?: { time?: number; title?: string };
+  questions: MCQ[];
+} = level5;
 
 /* -----------------------------
    星等 / 解鎖規則
@@ -759,11 +770,20 @@ export default function App() {
                 unit={unit}
                 // @ts-ignore
                 perQuestionTime={20}
-  fixedSet={
-    unitId === 1
-      ? ({ 1: fixedU1L1, 2: fixedU1L2, 3: fixedU1L3, 4: fixedU1L4, 5: fixedU1L5 } as const)[level]
-      : undefined
-  }                onFinish={handleChallengeFinish}
+                fixedSet={
+                  unitId === 1
+                    ? (
+                        {
+                          1: fixedU1L1,
+                          2: fixedU1L2,
+                          3: fixedU1L3,
+                          4: fixedU1L4,
+                          5: fixedU1L5,
+                        } as const
+                      )[level]
+                    : undefined
+                }
+                onFinish={handleChallengeFinish}
               />
             ))}
           {/* 獎章區 */}
